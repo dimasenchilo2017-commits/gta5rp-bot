@@ -735,7 +735,7 @@ client.on('interactionCreate', async i => {
                 } catch (err) { /* игнорируем */ }
 
                 const participants = oldEmbed.fields.filter(f => f.name !== 'Конец' && f.name !== 'ИНСТРУКЦИЯ');
-                const multiplier = participants.length >= 2 ? 0.2 : 0.4;
+                const multiplier = participants.length >= 2 ? 0.5 : 0.5;
 
                 console.log(`[LOG] Контракт "${oldEmbed.title}" закрыт как УСПЕХ пользователем ${i.user.tag}`);
                 participants.forEach(f => console.log(`   -> ${f.name}: ${f.value}`));
@@ -1587,7 +1587,7 @@ client.on('interactionCreate', async i => {
                 }
 
                 const participants = oldEmbed.fields.filter(f => f.name !== 'Конец' && f.name !== 'ИНСТРУКЦИЯ');
-                const multiplier = participants.length >= 2 ? 0.2 : 0.4;
+                const multiplier = participants.length >= 2 ? 0.5 : 0.5;
 
                 console.log(`[LOG] Контракт "${oldEmbed.title}" завершён как УСПЕХ пользователем ${i.user.tag}`);
                 participants.forEach(f => console.log(`   -> ${f.name}: ${f.value}`));
