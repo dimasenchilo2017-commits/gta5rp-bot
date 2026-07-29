@@ -28,20 +28,70 @@ db.exec(`
         endTime INTEGER,
         channelId TEXT
     );
+    
     CREATE TABLE IF NOT EXISTS contract_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT, 
         msgId TEXT, 
-        creatorId TEXT, 
+        title TEXT,
         status TEXT, 
-        finishedAt DATETIME
+        closedAt INTEGER,
+        creatorId TEXT
     );
+    
     CREATE TABLE IF NOT EXISTS treasury (
         id INTEGER PRIMARY KEY CHECK (id = 1), 
         balance INTEGER DEFAULT 0
     );
+    
     CREATE TABLE IF NOT EXISTS debtors (
         name TEXT PRIMARY KEY, 
         amount INTEGER
+    );
+    
+    CREATE TABLE IF NOT EXISTS pending_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contractMsgId TEXT NOT NULL,
+        paymentMsgId TEXT NOT NULL,
+        creatorId TEXT NOT NULL,
+        title TEXT,
+        totalAmount INTEGER NOT NULL,
+        createdAt INTEGER NOT NULL,
+        deadline INTEGER NOT NULL,
+        paid INTEGER DEFAULT 0
+    );
+    
+    CREATE TABLE IF NOT EXISTS overdue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debtorName TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        deadline INTEGER NOT NULL,
+        createdAt INTEGER NOT NULL,
+        resolved INTEGER DEFAULT 0
+    );
+    
+    CREATE TABLE IF NOT EXISTS critical_overdue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debtorName TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        deadline INTEGER NOT NULL,
+        createdAt INTEGER NOT NULL,
+        resolved INTEGER DEFAULT 0
+    );
+    
+    CREATE TABLE IF NOT EXISTS paid_markers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        debtorName TEXT NOT NULL,
+        contractTitle TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        markedBy TEXT NOT NULL,
+        createdAt INTEGER NOT NULL
+    );
+    
+    CREATE TABLE IF NOT EXISTS wallets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playerName TEXT NOT NULL UNIQUE,
+        balance INTEGER NOT NULL DEFAULT 0,
+        updatedAt INTEGER NOT NULL
     );
 `);
 

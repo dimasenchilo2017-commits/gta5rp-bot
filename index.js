@@ -282,6 +282,21 @@ const commands = [
         .addStringOption(o => o.setName('ник').setDescription('Ник должника').setRequired(true))
         .addStringOption(o => o.setName('контракт').setDescription('Название контракта').setRequired(true))
         .addIntegerOption(o => o.setName('сумма').setDescription('Сумма').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('внести_в_кошелек')
+        .setDescription('Добавить деньги в кошелёк игрока')
+        .addStringOption(o => o.setName('ник').setDescription('Ник игрока').setRequired(true))
+        .addIntegerOption(o => o.setName('сумма').setDescription('Сумма').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('кошелек')
+        .setDescription('Показать баланс кошелька игрока')
+        .addStringOption(o => o.setName('ник').setDescription('Ник игрока').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('оплатить_с_кошелька')
+        .setDescription('Оплатить с кошелька')
+        .addStringOption(o => o.setName('ник').setDescription('Ник игрока').setRequired(true))
+        .addStringOption(o => o.setName('контракт').setDescription('Название контракта').setRequired(true))
+        .addIntegerOption(o => o.setName('сумма_долга').setDescription('Сумма долга').setRequired(true)),
     { name: 'Импортировать контракт', type: ApplicationCommandType.Message },
     { name: 'Закрыть контракт', type: ApplicationCommandType.Message },
     { name: 'Напомнить о закрытии', type: ApplicationCommandType.Message },
@@ -1178,6 +1193,109 @@ client.on('interactionCreate', async i => {
                 
                 await i.reply({ 
                     content: `✅ Отметка об оплате для **${nick}** по контракту **"${contractTitle}"** на сумму ${amount.toLocaleString()} $ удалена.`,
+                    flags: [MessageFlags.Ephemeral] 
+                });
+                return;
+            }
+
+            // ---- КОШЕЛЁК: /внести_в_кошелек ----
+            if (i.commandName === 'внести_в_кошелек') {
+                const playerName = i.options.getString('ник');
+                const amount = i.options.getInteger('сумма');
+                
+                if (amount <= 0) {
+                    return i.reply({ content: '❌ Сумма должна быть больше 0.', flags: [MessageFlags.Ephemeral] });
+                }
+                
+                // Проверяем, существует ли кошелёк
+                const existing = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(playerName);
+                if (existing) {
+                    db.prepare('UPDATE wallets SET balance = balance + ?, updatedAt = ? WHERE playerName = ?')
+                        .run(amount, Date.now(), playerName);
+                } else {
+                    db.prepare('INSERT INTO wallets (playerName, balance, updatedAt) VALUES (?, ?, ?)')
+                        .run(playerName, amount, Date.now());
+                }
+                
+                // Получаем новый баланс
+                const newBalance = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(playerName);
+                
+                await i.reply({ 
+                    content: `✅ Кошелёк **${playerName}** пополнен на ${amount.toLocaleString()} $.\n💰 Текущий баланс: ${newBalance.balance.toLocaleString()} $`,
+                    flags: [MessageFlags.Ephemeral] 
+                });
+                return;
+            }
+
+            // ---- КОШЕЛЁК: /кошелек ----
+            if (i.commandName === 'кошелек') {
+                const playerName = i.options.getString('ник');
+                const wallet = db.prepare('SELECT balance, updatedAt FROM wallets WHERE playerName = ?').get(playerName);
+                
+                if (!wallet) {
+                    return i.reply({ 
+                        content: `❌ Кошелёк для **${playerName}** не найден.`,
+                        flags: [MessageFlags.Ephemeral] 
+                    });
+                }
+                
+                const date = new Date(wallet.updatedAt);
+                await i.reply({ 
+                    content: `💰 **${playerName}**\nБаланс: ${wallet.balance.toLocaleString()} $\n📅 Последнее обновление: ${date.toLocaleString()}`,
+                    flags: [MessageFlags.Ephemeral] 
+                });
+                return;
+            }
+
+            // ---- КОШЕЛЁК: /оплатить_с_кошелька ----
+            if (i.commandName === 'оплатить_с_кошелька') {
+                const playerName = i.options.getString('ник');
+                const contractTitle = i.options.getString('контракт');
+                const amount = i.options.getInteger('сумма_долга');
+                
+                if (amount <= 0) {
+                    return i.reply({ content: '❌ Сумма должна быть больше 0.', flags: [MessageFlags.Ephemeral] });
+                }
+                
+                // Проверяем баланс кошелька
+                const wallet = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(playerName);
+                if (!wallet) {
+                    return i.reply({ 
+                        content: `❌ Кошелёк для **${playerName}** не найден.`,
+                        flags: [MessageFlags.Ephemeral] 
+                    });
+                }
+                
+                if (wallet.balance < amount) {
+                    return i.reply({ 
+                        content: `❌ Недостаточно средств на кошельке **${playerName}**.\n💰 Доступно: ${wallet.balance.toLocaleString()} $, требуется: ${amount.toLocaleString()} $`,
+                        flags: [MessageFlags.Ephemeral] 
+                    });
+                }
+                
+                // 1. Списываем с кошелька
+                db.prepare('UPDATE wallets SET balance = balance - ?, updatedAt = ? WHERE playerName = ?')
+                    .run(amount, Date.now(), playerName);
+                
+                // 2. Добавляем отметку в paid_markers
+                db.prepare(`
+                    INSERT INTO paid_markers (debtorName, contractTitle, amount, markedBy, createdAt)
+                    VALUES (?, ?, ?, ?, ?)
+                `).run(playerName, contractTitle, amount, i.user.id, Date.now());
+                
+                // 3. Списываем из debtors
+                deductDebt(playerName, amount);
+                
+                // 4. Добавляем в казну
+                db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(amount);
+                
+                // Получаем новый баланс
+                const newBalance = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(playerName);
+                
+                console.log(`[LOG] /оплатить_с_кошелька: ${playerName} оплатил ${amount.toLocaleString()} $ по контракту "${contractTitle}" (обработал ${i.user.tag})`);
+                
+                await i.reply({ 
+                    content: `✅ Оплата с кошелька **${playerName}** по контракту **"${contractTitle}"** на сумму ${amount.toLocaleString()} $ проведена.\n💰 Остаток на кошельке: ${newBalance.balance.toLocaleString()} $`,
                     flags: [MessageFlags.Ephemeral] 
                 });
                 return;
