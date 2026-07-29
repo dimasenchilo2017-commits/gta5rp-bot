@@ -77,7 +77,7 @@ client.once('clientReady', async () => {
         try {
             const channel = await client.channels.fetch(contract.channelId);
             if (Date.now() >= contract.endTime) {
-                await channel.send(`⚠️ **ВРЕМЯ КОНТРАКТА ВЫШЛО!** <@${contract.creatorId}>`);
+                await channel.send(`⚠️ **ВРЕМЯ КОНТРАКТА ВЫШЛО!** <@${contract.creatorId}>, проверьте и закройте контракт после того как он завершится в игре!`);
                 db.prepare('DELETE FROM active_contracts WHERE msgId = ?').run(contract.msgId);
             } else {
                 setupTimer(client, channel, contract.creatorId, contract.endTime);
