@@ -1,3 +1,4 @@
+process.env.TZ = 'Europe/Moscow';
 require('dotenv').config();
 if (!process.env.TOKEN) {
     console.error('❌ ТОКЕН НЕ ЗАГРУЖЕН!');
