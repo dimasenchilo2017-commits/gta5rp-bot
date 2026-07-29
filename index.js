@@ -138,35 +138,39 @@ client.on('messageCreate', async msg => {
         const hasRole = msg.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
         if (!hasRole) {
             const reply = await msg.reply('❌ Нет прав.');
-            setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 5000);
+            setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 3000);
             return;
         }
         if (!msg.reference || !msg.reference.messageId) {
             const reply = await msg.reply('❌ Ответьте на сообщение.');
-            setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 5000);
+            setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 3000);
             return;
         }
         try {
             const targetMsg = await msg.channel.messages.fetch(msg.reference.messageId);
             if (!targetMsg) {
                 const reply = await msg.reply('❌ Сообщение не найдено.');
-                setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 5000);
+                setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 3000);
                 return;
             }
             if (!targetMsg.embeds?.[0]?.fields?.length) {
                 const reply = await msg.reply('❌ Это не сообщение с платежом.');
-                setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 5000);
+                setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 3000);
                 return;
             }
 
             console.log(`[LOG] !подтвердить от ${msg.author.tag}`);
             const contractTitle = targetMsg.embeds[0]?.title || 'Неизвестный контракт';
+            
+            // Удаляем отметки оплаты
             db.prepare('DELETE FROM paid_markers WHERE contractTitle = ?').run(contractTitle);
 
             let totalPaid = 0;
+            const participants = [];
             targetMsg.embeds[0].fields.forEach(field => {
                 const amount = parseInt(field.value.replace(/\D/g, '')) || 0;
                 if (amount > 0) {
+                    participants.push({ name: field.name, amount });
                     deductDebt(field.name, amount);
                     totalPaid += amount;
                 }
@@ -176,24 +180,63 @@ client.on('messageCreate', async msg => {
             if (totalPaid > 0) db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(totalPaid);
             db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(targetMsg.id);
 
+            // [!] 1. МЕНЯЕМ ТЕКСТ СООБЩЕНИЯ С КНОПКОЙ
             try {
-                await targetMsg.edit({ content: `✅ **Оплата подтверждена! Проверяющий: <@${msg.author.id}>**`, components: [] });
+                // Формируем список участников для красивого отображения
+                let details = `✅ **Оплата подтверждена!** Проверяющий: <@${msg.author.id}>\n\n`;
+                details += `📋 **${contractTitle}**\n`;
+                participants.forEach(p => {
+                    details += `• **${p.name}**: ${p.amount.toLocaleString()} $\n`;
+                });
+                details += `\n💰 Итого в казну: ${totalPaid.toLocaleString()} $`;
+                
+                await targetMsg.edit({ 
+                    content: details, 
+                    components: [] 
+                });
+                console.log(`[EDIT] Сообщение с кнопкой обновлено`);
             } catch (editErr) {
-                await targetMsg.delete().catch(() => {});
-                await msg.channel.send(`✅ **Оплата подтверждена!** Проверяющий: <@${msg.author.id}>`);
+                console.warn('Не удалось отредактировать сообщение:', editErr);
+                // Если не получилось отредактировать — удаляем и отправляем новое
+                try {
+                    await targetMsg.delete();
+                    await msg.channel.send({
+                        content: `✅ **Оплата подтверждена!** Проверяющий: <@${msg.author.id}>\n\n📋 **${contractTitle}**\n${participants.map(p => `• **${p.name}**: ${p.amount.toLocaleString()} $`).join('\n')}\n\n💰 Итого в казну: ${totalPaid.toLocaleString()} $`
+                    });
+                } catch (err) {
+                    console.warn('Не удалось удалить сообщение:', err);
+                }
             }
 
+            // [!] 2. УДАЛЯЕМ СООБЩЕНИЕ ОЖИДАНИЯ
             const pendingMsgId = global.pendingMessages?.get(targetMsg.id);
             if (pendingMsgId) {
-                try { await msg.channel.messages.fetch(pendingMsgId).then(m => m.delete()); } catch (e) {}
+                try {
+                    const pendingMsg = await msg.channel.messages.fetch(pendingMsgId);
+                    if (pendingMsg) {
+                        await pendingMsg.delete();
+                        console.log(`[DELETE] Удалено сообщение ожидания ${pendingMsgId}`);
+                    }
+                } catch (err) {
+                    console.warn('Не удалось найти/удалить сообщение ожидания:', err);
+                }
                 global.pendingMessages.delete(targetMsg.id);
             }
 
-            await msg.reply('✅ Контракт закрыт, долги обновлены.');
-            await msg.delete().catch(() => {});
+            // [!] 3. УДАЛЯЕМ СООБЩЕНИЕ С !подтвердить И ОТВЕТ БОТА
+            const replyMsg = await msg.reply('✅ Контракт закрыт, долги обновлены.');
+            setTimeout(async () => {
+                await msg.delete().catch(() => {});
+                await replyMsg.delete().catch(() => {});
+            }, 3000);
+
         } catch (err) {
-            console.error(err);
-            await msg.reply('❌ Ошибка.');
+            console.error('[ERROR] !подтвердить:', err);
+            const reply = await msg.reply('❌ Ошибка при подтверждении.');
+            setTimeout(async () => {
+                await msg.delete().catch(() => {});
+                await reply.delete().catch(() => {});
+            }, 3000);
         }
         return;
     }
