@@ -162,7 +162,6 @@ client.on('messageCreate', async msg => {
             console.log(`[LOG] !подтвердить от ${msg.author.tag}`);
             const contractTitle = targetMsg.embeds[0]?.title || 'Неизвестный контракт';
             
-            // Удаляем отметки оплаты
             db.prepare('DELETE FROM paid_markers WHERE contractTitle = ?').run(contractTitle);
 
             let totalPaid = 0;
@@ -180,9 +179,7 @@ client.on('messageCreate', async msg => {
             if (totalPaid > 0) db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(totalPaid);
             db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(targetMsg.id);
 
-            // [!] 1. МЕНЯЕМ ТЕКСТ СООБЩЕНИЯ С КНОПКОЙ
             try {
-                // Формируем список участников для красивого отображения
                 let details = `✅ **Оплата подтверждена!** Проверяющий: <@${msg.author.id}>\n\n`;
                 details += `📋 **${contractTitle}**\n`;
                 participants.forEach(p => {
@@ -197,7 +194,6 @@ client.on('messageCreate', async msg => {
                 console.log(`[EDIT] Сообщение с кнопкой обновлено`);
             } catch (editErr) {
                 console.warn('Не удалось отредактировать сообщение:', editErr);
-                // Если не получилось отредактировать — удаляем и отправляем новое
                 try {
                     await targetMsg.delete();
                     await msg.channel.send({
@@ -208,7 +204,6 @@ client.on('messageCreate', async msg => {
                 }
             }
 
-            // [!] 2. УДАЛЯЕМ СООБЩЕНИЕ ОЖИДАНИЯ
             const pendingMsgId = global.pendingMessages?.get(targetMsg.id);
             if (pendingMsgId) {
                 try {
@@ -223,7 +218,6 @@ client.on('messageCreate', async msg => {
                 global.pendingMessages.delete(targetMsg.id);
             }
 
-            // [!] 3. УДАЛЯЕМ СООБЩЕНИЕ С !подтвердить И ОТВЕТ БОТА
             const replyMsg = await msg.reply('✅ Контракт закрыт, долги обновлены.');
             setTimeout(async () => {
                 await msg.delete().catch(() => {});
@@ -642,24 +636,44 @@ client.on('interactionCreate', async i => {
                     const nick = i.options.getString('ник');
                     const amount = i.options.getInteger('сумма');
                     const newAmount = Math.round(amount * 1.25);
-                    const existing = db.prepare('SELECT amount FROM debtors WHERE name = ?').get(nick);
-                    if (existing) db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(existing.amount + newAmount, nick);
-                    else db.prepare('INSERT INTO debtors (name, amount) VALUES (?, ?)').run(nick, newAmount);
+                    
+                    // [!] ПЕРЕЗАПИСЫВАЕМ долг (НЕ прибавляем!)
+                    db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(newAmount, nick);
+                    if (db.prepare('SELECT changes()').get().changes === 0) {
+                        db.prepare('INSERT INTO debtors (name, amount) VALUES (?, ?)').run(nick, newAmount);
+                    }
+                    
                     const deadline = Date.now() + 48 * 60 * 60 * 1000;
-                    db.prepare(`INSERT INTO overdue (debtorName, amount, deadline, createdAt) VALUES (?, ?, ?, ?)`).run(nick, newAmount, deadline, Date.now());
-                    return i.reply({ content: `✅ Штраф для **${nick}**: +${newAmount.toLocaleString()} $`, flags: [MessageFlags.Ephemeral] });
+                    db.prepare(`INSERT INTO overdue (debtorName, amount, deadline, createdAt) VALUES (?, ?, ?, ?)`)
+                        .run(nick, newAmount, deadline, Date.now());
+                    
+                    console.log(`[LOG] /просрочка: ${nick} ${amount} → ${newAmount} $ (×1.25)`);
+                    return i.reply({ 
+                        content: `✅ Штраф для **${nick}**: ${newAmount.toLocaleString()} $ (${amount.toLocaleString()} × 1.25)`, 
+                        flags: [MessageFlags.Ephemeral] 
+                    });
                 }
 
                 case 'критическая': {
                     const nick = i.options.getString('ник');
                     const amount = i.options.getInteger('сумма');
                     const newAmount = Math.round(amount * 1.25);
-                    const existing = db.prepare('SELECT amount FROM debtors WHERE name = ?').get(nick);
-                    if (existing) db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(existing.amount + newAmount, nick);
-                    else db.prepare('INSERT INTO debtors (name, amount) VALUES (?, ?)').run(nick, newAmount);
+                    
+                    // [!] ПЕРЕЗАПИСЫВАЕМ долг (НЕ прибавляем!)
+                    db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(newAmount, nick);
+                    if (db.prepare('SELECT changes()').get().changes === 0) {
+                        db.prepare('INSERT INTO debtors (name, amount) VALUES (?, ?)').run(nick, newAmount);
+                    }
+                    
                     const deadline = Date.now() + 48 * 60 * 60 * 1000;
-                    db.prepare(`INSERT INTO critical_overdue (debtorName, amount, deadline, createdAt) VALUES (?, ?, ?, ?)`).run(nick, newAmount, deadline, Date.now());
-                    return i.reply({ content: `✅ Критическая для **${nick}**: +${newAmount.toLocaleString()} $`, flags: [MessageFlags.Ephemeral] });
+                    db.prepare(`INSERT INTO critical_overdue (debtorName, amount, deadline, createdAt) VALUES (?, ?, ?, ?)`)
+                        .run(nick, newAmount, deadline, Date.now());
+                    
+                    console.log(`[LOG] /критическая: ${nick} ${amount} → ${newAmount} $ (×1.25)`);
+                    return i.reply({ 
+                        content: `✅ Критическая для **${nick}**: ${newAmount.toLocaleString()} $ (${amount.toLocaleString()} × 1.25)`, 
+                        flags: [MessageFlags.Ephemeral] 
+                    });
                 }
             }
             return;
