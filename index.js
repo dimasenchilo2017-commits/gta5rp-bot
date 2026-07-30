@@ -592,7 +592,7 @@ client.on('interactionCreate', async i => {
                         const sortedDebtors = Array.from(allDebtors.entries()).sort((a, b) => a[0].localeCompare(b[0]));
                         let activeDebtors = 0;
                         for (const [name, debts] of sortedDebtors) {
-                            const total = debts.debtors;;
+                            const total = debts.debtors + debts.overdue + debts.critical;;;
                             if (total > 0) activeDebtors++;
                         }
                         if (activeDebtors === 0) {
@@ -600,7 +600,7 @@ client.on('interactionCreate', async i => {
                         } else {
                             text += `👥 **Все должники (${activeDebtors} чел.):**\n`;
                             for (const [name, debts] of sortedDebtors) {
-                                const total = debts.debtors;
+                                const total = debts.debtors + debts.overdue + debts.critical;
                                 if (total === 0) continue;
                                 
                                 let totalPaidMarkers = 0;
