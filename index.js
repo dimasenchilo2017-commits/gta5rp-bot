@@ -297,7 +297,7 @@ client.on('interactionCreate', async i => {
                     .setColor(0x00FF00)
                     .setDescription(
                         `**Исполнитель:** <@${contract.creatorId}>\n\n` +
-                        `<${executorMentions}>, внесите сумму в казну и приложите скриншот\n` +
+                        `<@${executorMentions}>, внесите сумму в казну и приложите скриншот\n` +
                         `**Проверяющий:** ответьте \`!подтвердить\`\n` +
                         `**Оплатить нужно в течении 72 часов**`
                     );
@@ -741,7 +741,7 @@ client.on('interactionCreate', async i => {
                     .setColor(0x00FF00)
                     .setDescription(
                         `**Исполнитель:** <@${creatorId}>\n\n` +
-                        `<@${creatorId}>, внесите сумму в казну и приложите скриншот\n` +
+                        `<@${executorMentions}>, внесите сумму в казну и приложите скриншот\n` +
                         `**Проверяющий:** ответьте \`!подтвердить\`\n` +
                         `**Оплатить нужно в течении 72 часов**`
                     );
