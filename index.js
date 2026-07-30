@@ -592,7 +592,7 @@ client.on('interactionCreate', async i => {
                         const sortedDebtors = Array.from(allDebtors.entries()).sort((a, b) => a[0].localeCompare(b[0]));
                         let activeDebtors = 0;
                         for (const [name, debts] of sortedDebtors) {
-                            const total = debts.debtors + debts.overdue + debts.critical;
+                            const total = debts.debtors;;
                             if (total > 0) activeDebtors++;
                         }
                         if (activeDebtors === 0) {
@@ -600,7 +600,7 @@ client.on('interactionCreate', async i => {
                         } else {
                             text += `👥 **Все должники (${activeDebtors} чел.):**\n`;
                             for (const [name, debts] of sortedDebtors) {
-                                const total = debts.debtors + debts.overdue + debts.critical;
+                                const total = debts.debtors;
                                 if (total === 0) continue;
                                 
                                 let totalPaidMarkers = 0;
@@ -647,20 +647,14 @@ client.on('interactionCreate', async i => {
                         db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(remainingDebt, nick);
                     }
                     
-                    // [!] ДОБАВЛЯЕМ ПРОСРОЧКУ
-                    if (remainingDebt === 0) {
-                        db.prepare('INSERT INTO debtors (name, amount) VALUES (?, ?)').run(nick, newAmount);
-                    } else {
-                        db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(remainingDebt + newAmount, nick);
-                    }
-                    
+                    // [!] ДОБАВЛЯЕМ ПРОСРОЧКУ ТОЛЬКО В overdue (НЕ В debtors!)
                     const deadline = Date.now() + 48 * 60 * 60 * 1000;
                     db.prepare(`INSERT INTO overdue (debtorName, amount, deadline, createdAt) VALUES (?, ?, ?, ?)`)
                         .run(nick, newAmount, deadline, Date.now());
                     
-                    console.log(`[LOG] /просрочка: ${nick} ${amount} → ${newAmount} $ (старый списан)`);
+                    console.log(`[LOG] /просрочка: ${nick} ${amount} → ${newAmount} $ (только в overdue)`);
                     return i.reply({ 
-                        content: `✅ Штраф для **${nick}**: ${newAmount.toLocaleString()} $ (${amount.toLocaleString()} × 1.25)\n📌 Старый долг списан, добавлена просрочка.`, 
+                        content: `✅ Штраф для **${nick}**: ${newAmount.toLocaleString()} $ (${amount.toLocaleString()} × 1.25)\n📌 Старый долг списан, просрочка добавлена отдельно.`, 
                         flags: [MessageFlags.Ephemeral] 
                     });
                 }
@@ -680,20 +674,14 @@ client.on('interactionCreate', async i => {
                         db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(remainingDebt, nick);
                     }
                     
-                    // [!] ДОБАВЛЯЕМ КРИТИЧЕСКУЮ ПРОСРОЧКУ
-                    if (remainingDebt === 0) {
-                        db.prepare('INSERT INTO debtors (name, amount) VALUES (?, ?)').run(nick, newAmount);
-                    } else {
-                        db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(remainingDebt + newAmount, nick);
-                    }
-                    
+                    // [!] ДОБАВЛЯЕМ КРИТИЧЕСКУЮ ПРОСРОЧКУ ТОЛЬКО В critical_overdue (НЕ В debtors!)
                     const deadline = Date.now() + 48 * 60 * 60 * 1000;
                     db.prepare(`INSERT INTO critical_overdue (debtorName, amount, deadline, createdAt) VALUES (?, ?, ?, ?)`)
                         .run(nick, newAmount, deadline, Date.now());
                     
-                    console.log(`[LOG] /критическая: ${nick} ${amount} → ${newAmount} $ (старый списан)`);
+                    console.log(`[LOG] /критическая: ${nick} ${amount} → ${newAmount} $ (только в critical_overdue)`);
                     return i.reply({ 
-                        content: `✅ Критическая для **${nick}**: ${newAmount.toLocaleString()} $ (${amount.toLocaleString()} × 1.25)\n📌 Старый долг списан, добавлена критическая просрочка.`, 
+                        content: `✅ Критическая для **${nick}**: ${newAmount.toLocaleString()} $ (${amount.toLocaleString()} × 1.25)\n📌 Старый долг списан, критическая просрочка добавлена отдельно.`, 
                         flags: [MessageFlags.Ephemeral] 
                     });
                 }
