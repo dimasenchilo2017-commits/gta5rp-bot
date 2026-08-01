@@ -176,7 +176,7 @@ client.on('messageCreate', async msg => {
                 return;
             }
 
-            const { participantName, amount, buttonMessageId, buttonCustomId } = paymentData;
+            const { participantName, amount, buttonMessageId, buttonCustomId, contractTitle } = paymentData;
             
             if (amount <= 0) {
                 const reply = await msg.reply('❌ Сумма не найдена.');
@@ -190,8 +190,9 @@ client.on('messageCreate', async msg => {
             db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(amount);
             db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(buttonCustomId);
 
+            let buttonMsg = null;
             try {
-                const buttonMsg = await msg.channel.messages.fetch(buttonMessageId);
+                buttonMsg = await msg.channel.messages.fetch(buttonMessageId);
                 if (buttonMsg && buttonMsg.components && buttonMsg.components.length > 0) {
                     const rows = buttonMsg.components;
                     let updated = false;
@@ -224,6 +225,60 @@ client.on('messageCreate', async msg => {
                 }
             } catch (err) {
                 console.warn('Не удалось обновить сообщение с кнопками:', err);
+            }
+
+            // [!] ПРОВЕРЯЕМ, ВСЕ ЛИ ОПЛАТИЛИ
+            if (buttonMsg) {
+                try {
+                    const freshMsg = await msg.channel.messages.fetch(buttonMessageId);
+                    if (freshMsg && freshMsg.components) {
+                        let allDisabled = true;
+                        for (const row of freshMsg.components) {
+                            for (const comp of row.components) {
+                                if (comp.customId && comp.customId.startsWith('pay_') && !comp.disabled) {
+                                    allDisabled = false;
+                                    break;
+                                }
+                            }
+                            if (!allDisabled) break;
+                        }
+                        
+                        if (allDisabled) {
+                            const embed = freshMsg.embeds[0];
+                            if (embed) {
+                                const desc = embed.description || '';
+                                const lines = desc.split('\n');
+                                let newLines = [];
+                                let inDebtSection = false;
+                                for (const line of lines) {
+                                    if (line.includes('**Долги участников:**')) {
+                                        inDebtSection = true;
+                                        newLines.push(line);
+                                        continue;
+                                    }
+                                    if (inDebtSection && line.trim().startsWith('•')) {
+                                        if (!line.includes('~~')) {
+                                            newLines.push(`   • ~~${line.replace('•', '').trim()}~~ ✅`);
+                                        } else {
+                                            newLines.push(line);
+                                        }
+                                    } else {
+                                        newLines.push(line);
+                                    }
+                                }
+                                newLines.push('\n✅ **ВСЕ ОПЛАЧЕНО!** 🎉');
+                                const newDesc = newLines.join('\n');
+                                const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
+                                await freshMsg.edit({ embeds: [newEmbed] });
+                                
+                                db.prepare(`INSERT INTO paid_markers (debtorName, contractTitle, amount, markedBy, createdAt) VALUES (?, ?, ?, ?, ?)`)
+                                    .run('ВСЕ УЧАСТНИКИ', contractTitle || 'Неизвестный контракт', 0, 'SYSTEM', Date.now());
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Не удалось проверить все оплаты:', err);
+                }
             }
 
             const pendingMsgId = global.pendingMessages?.get(targetMsg.id);
@@ -341,7 +396,6 @@ client.on('interactionCreate', async i => {
                     const memberMention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : p.name;
                     description += `• ${memberMention}: **${p.amount.toLocaleString()} $**\n`;
                     
-                    // [!] ГЕНЕРИРУЕМ УНИКАЛЬНЫЙ ID
                     const uniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
                     const customId = `pay_${uniqueId}`;
                     buttons.push(
@@ -368,14 +422,13 @@ client.on('interactionCreate', async i => {
                     components: rows
                 });
 
-                // [!] Сохраняем запись для КАЖДОГО участника с УНИКАЛЬНЫМ paymentMsgId
                 for (let i = 0; i < paymentData.length; i++) {
                     const p = paymentData[i];
                     const customId = buttons[i].data.custom_id;
                     db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
                         .run(
                             msgId, 
-                            customId,  // <-- УНИКАЛЬНЫЙ ID!
+                            customId,
                             contract.creatorId, 
                             `${oldEmbed.title} - ${p.name}`, 
                             p.amount, 
