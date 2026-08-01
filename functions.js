@@ -104,39 +104,35 @@ async function getPendingDetails(client, pendingRecords, CONFIG) {
     if (pendingRecords.length === 0) return '';
     const payChannel = await client.channels.fetch(CONFIG.PAY);
     let result = '';
+    
+    // Группируем записи по contractMsgId
+    const grouped = new Map();
     for (const p of pendingRecords) {
-        const isManual = p.contractMsgId && p.contractMsgId.startsWith('manual_');
-        try {
-            const msg = await payChannel.messages.fetch(p.paymentMsgId);
-            if (msg.embeds && msg.embeds.length > 0 && msg.embeds[0].fields) {
-                const fields = msg.embeds[0].fields;
-                let allPaid = true, participantLines = [], hasAnyParticipants = false;
-                for (const field of fields) {
-                    const amountMatch = field.value.match(/([\d, ]+)\s*\$?/);
-                    const amount = amountMatch ? amountMatch[1].trim() : '0';
-                    const cleanAmount = parseInt(amount.replace(/\s/g, '')) || 0;
-                    const paidMarker = db.prepare(`SELECT 1 FROM paid_markers WHERE debtorName = ? AND contractTitle = ? AND amount = ?`).get(field.name, p.title, cleanAmount);
-                    const isPaid = !!paidMarker;
-                    if (!isPaid) allPaid = false;
-                    hasAnyParticipants = true;
-                    if (isPaid) participantLines.push(`   • ~~**${field.name}**: ${amount} $~~ ✅`);
-                    else participantLines.push(`   • **${field.name}**: ${amount} $`);
-                }
-                if (allPaid && hasAnyParticipants) continue;
-                result += `💳 **${p.title}**${isManual ? ' (📝 ручная оплата)' : ''}\n${participantLines.join('\n')}\n`;
-                const timeLeft = Math.round((p.deadline - Date.now()) / (1000 * 60 * 60));
-                result += `   ${timeLeft > 0 ? `⏳ осталось ${timeLeft} ч.` : '⌛ **ПРОСРОЧЕН!**'}\n`;
-            } else {
-                result += `💳 **${p.title}**${isManual ? ' (📝 ручная оплата)' : ''}\n   (данные о платеже недоступны, общая сумма: ${p.totalAmount.toLocaleString()} $)\n`;
-                const timeLeft = Math.round((p.deadline - Date.now()) / (1000 * 60 * 60));
-                result += `   ${timeLeft > 0 ? `⏳ осталось ${timeLeft} ч.` : '⌛ **ПРОСРОЧЕН!**'}\n`;
-            }
-        } catch (e) {
-            result += `💳 **${p.title}**${isManual ? ' (📝 ручная оплата)' : ''}\n   (сообщение с платежом не найдено, общая сумма: ${p.totalAmount.toLocaleString()} $)\n`;
-            const timeLeft = Math.round((p.deadline - Date.now()) / (1000 * 60 * 60));
-            result += `   ${timeLeft > 0 ? `⏳ осталось ${timeLeft} ч.` : '⌛ **ПРОСРОЧЕН!**'}\n`;
+        const contractTitle = p.title.split(' - ')[0] || p.title;
+        if (!grouped.has(p.contractMsgId)) {
+            grouped.set(p.contractMsgId, {
+                title: contractTitle,
+                participants: [],
+                totalAmount: 0,
+                deadline: p.deadline
+            });
         }
-        result += '\n';
+        const group = grouped.get(p.contractMsgId);
+        const participantName = p.title.split(' - ')[1] || 'Неизвестный участник';
+        group.participants.push({ name: participantName, amount: p.totalAmount });
+        group.totalAmount += p.totalAmount;
+        if (p.deadline < group.deadline) group.deadline = p.deadline;
+    }
+
+    for (const [contractMsgId, group] of grouped) {
+        const isManual = contractMsgId && contractMsgId.startsWith('manual_');
+        result += `💳 **${group.title}**${isManual ? ' (📝 ручная оплата)' : ''}\n`;
+        for (const p of group.participants) {
+            result += `   • ${p.name}: ${p.amount.toLocaleString()} $\n`;
+        }
+        const timeLeft = Math.round((group.deadline - Date.now()) / (1000 * 60 * 60));
+        const status = timeLeft > 0 ? `⏳ осталось ${timeLeft} ч.` : '⌛ **ПРОСРОЧЕН!**';
+        result += `   ${status}\n\n`;
     }
     return result;
 }

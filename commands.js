@@ -24,6 +24,24 @@ module.exports = [
     new SlashCommandBuilder().setName('оплатить_с_кошелька').setDescription('Оплатить с кошелька').addStringOption(o => o.setName('ник').setDescription('Ник игрока').setRequired(true)).addStringOption(o => o.setName('контракт').setDescription('Название контракта').setRequired(true)).addIntegerOption(o => o.setName('сумма_долга').setDescription('Сумма долга').setRequired(true)),
     new SlashCommandBuilder().setName('очистить_контракт').setDescription('Удалить все записи по названию контракта (админ)').addStringOption(o => o.setName('название').setDescription('Название контракта').setRequired(true)),
     new SlashCommandBuilder().setName('удалить_контракт').setDescription('Принудительно удалить контракт из БД (без редактирования сообщения)').addStringOption(o => o.setName('msgid').setDescription('ID сообщения с контрактом').setRequired(true)),
+    new SlashCommandBuilder().setName('бд').setDescription('Показать содержимое таблицы (админ)').addStringOption(o => 
+        o.setName('таблица')
+            .setDescription('Выберите таблицу')
+            .setRequired(true)
+            .addChoices(
+                { name: '💰 Кошельки (wallets)', value: 'wallets' },
+                { name: '👥 Должники (debtors)', value: 'debtors' },
+                { name: '⏰ Просрочки (overdue)', value: 'overdue' },
+                { name: '🔥 Критические просрочки (critical_overdue)', value: 'critical_overdue' },
+                { name: '💳 Ожидающие оплаты (pending_payments)', value: 'pending_payments' },
+                { name: '✅ Отметки об оплате (paid_markers)', value: 'paid_markers' }
+            )
+    )
+    .addStringOption(o => 
+        o.setName('ник')
+            .setDescription('Ник для поиска (необязательно)')
+            .setRequired(false)
+    ),
     { name: 'Импортировать контракт', type: ApplicationCommandType.Message },
     { name: 'Закрыть контракт', type: ApplicationCommandType.Message },
     { name: 'Напомнить о закрытии', type: ApplicationCommandType.Message },

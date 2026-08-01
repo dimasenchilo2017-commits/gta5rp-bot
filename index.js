@@ -826,6 +826,80 @@ client.on('interactionCreate', async i => {
                         content: `✅ Контракт **"${title}"** очищен!\n📌 Удалено записей: ${count.count}`,
                         flags: [MessageFlags.Ephemeral] 
                     });
+                    
+                }
+                case 'бд': {
+                    const hasRole = i.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
+                    if (!hasRole) {
+                        logAction('WARN', i.user, 'Попытка использовать /бд без прав');
+                        return i.reply({ content: '❌ Нет прав.', flags: [MessageFlags.Ephemeral] });
+                    }
+                    
+                    const table = i.options.getString('таблица');
+                    const nick = i.options.getString('ник');
+                    
+                    let rows = [];
+                    
+                    if (nick) {
+                        const columnMap = {
+                            'wallets': 'playerName',
+                            'debtors': 'name',
+                            'overdue': 'debtorName',
+                            'critical_overdue': 'debtorName',
+                            'pending_payments': 'title',
+                            'paid_markers': 'debtorName'
+                        };
+                        const column = columnMap[table] || 'name';
+                        
+                        if (table === 'pending_payments') {
+                            rows = db.prepare(`SELECT * FROM ${table} WHERE ${column} LIKE ? LIMIT 20`).all(`%${nick}%`);
+                        } else {
+                            rows = db.prepare(`SELECT * FROM ${table} WHERE ${column} = ? LIMIT 20`).all(nick);
+                        }
+                    } else {
+                        rows = db.prepare(`SELECT * FROM ${table} LIMIT 20`).all();
+                    }
+                    
+                    if (rows.length === 0) {
+                        return i.reply({ 
+                            content: nick ? `❌ В таблице **${table}** ничего не найдено для **${nick}**.` : `❌ В таблице **${table}** нет записей.`,
+                            flags: [MessageFlags.Ephemeral] 
+                        });
+                    }
+                    
+                    let text = `📊 **Таблица: ${table}**\n`;
+                    text += `📌 Найдено: ${rows.length} записей${nick ? ` для **${nick}**` : ''}\n\n`;
+                    
+                    const headers = Object.keys(rows[0]);
+                    text += `📋 ${headers.join(' | ')}\n`;
+                    text += `${'─'.repeat(Math.min(60, text.length))}\n`;
+                    
+                    for (const row of rows.slice(0, 10)) {
+                        const values = headers.map(h => {
+                            let val = row[h];
+                            if (val === null || val === undefined) return 'NULL';
+                            if (typeof val === 'number') return val.toLocaleString();
+                            if (typeof val === 'string' && val.length > 30) return val.substring(0, 27) + '...';
+                            if (h === 'updatedAt' || h === 'createdAt' || h === 'deadline' || h === 'closedAt') {
+                                if (typeof val === 'number' && val > 1000000000000) {
+                                    return new Date(val).toLocaleString('ru-RU');
+                                }
+                            }
+                            return String(val);
+                        });
+                        text += `${values.join(' | ')}\n`;
+                    }
+                    
+                    if (rows.length > 10) {
+                        text += `\n... и ещё ${rows.length - 10} записей`;
+                    }
+                    
+                    if (text.length > 1900) {
+                        text = text.substring(0, 1900) + '\n... (обрезано)';
+                    }
+                    
+                    logAction('ADMIN', i.user, `/бд ${table}${nick ? ' ник:' + nick : ''} | ${rows.length} записей`);
+                    return i.reply({ content: text, flags: [MessageFlags.Ephemeral] });
                 }
             }
             return;
@@ -909,6 +983,10 @@ client.on('interactionCreate', async i => {
 
                 // [!] Полностью из кошелька — сразу подтверждаем
                 if (!needManualPayment) {
+                    // [!] ПОЛУЧАЕМ НОВЫЙ БАЛАНС
+                    const newWallet = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(participantName);
+                    const newBalance = newWallet ? newWallet.balance : 0;
+                    
                     deductDebt(participantName, amount);
                     db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(amount);
                     db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(i.customId);
@@ -934,8 +1012,8 @@ client.on('interactionCreate', async i => {
                     logAction('WALLET_PAY_CONFIRM', i.user, `${participantName} | ${amount.toLocaleString()}$ (авто из кошелька)`);
                     return i.followUp({ 
                         content: `✅ Оплата **${participantName}** автоматически списана с кошелька!\n` +
-                                 `💰 Сумма: ${amount.toLocaleString()} $\n` +
-                                 `📌 Остаток на кошельке: 0 $`, 
+                                `💰 Сумма: ${amount.toLocaleString()} $\n` +
+                                `📌 Остаток на кошельке: ${newBalance.toLocaleString()} $`,  // ✅ РЕАЛЬНЫЙ ОСТАТОК
                         flags: [MessageFlags.Ephemeral] 
                     });
                 }
@@ -957,11 +1035,11 @@ client.on('interactionCreate', async i => {
                 global.pendingPayments.set(pendingMsg.id, {
                     participantName: participantName,
                     amount: remainingAmount,
-                    buttonMessageId: i.message.id,
+                    buttonMessageId: i.customId,  // ✅ ПРАВИЛЬНО!
                     paidFromWallet: paidFromWallet,
-                    totalAmount: amount
+                    totalAmount: amount,
+                    contractTitle: payment.title.split(' - ')[0] || 'Неизвестный контракт'
                 });
-
                 logAction('PAY_BUTTON', i.user, `${participantName} | ${amount.toLocaleString()}$ (${paidFromWallet > 0 ? paidFromWallet.toLocaleString() + '$ из кошелька' : 'наличными'})`);
                 return i.followUp({ 
                     content: `✅ Кнопка для **${participantName}** нажата.\n` +
