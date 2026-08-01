@@ -367,10 +367,21 @@ client.on('interactionCreate', async i => {
                     components: rows
                 });
 
-                db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-                    .run(msgId, payMsg.id, contract.creatorId, oldEmbed.title, totalAmount, Date.now(), Date.now() + 72 * 60 * 60 * 1000);
+                // [!] Сохраняем отдельную запись для КАЖДОГО участника
+                for (const p of paymentData) {
+                    db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+                        .run(
+                            msgId, 
+                            payMsg.id, 
+                            contract.creatorId, 
+                            `${oldEmbed.title} - ${p.name}`, 
+                            p.amount, 
+                            Date.now(), 
+                            Date.now() + 72 * 60 * 60 * 1000
+                        );
+                }
 
-                logAction('CONTRACT_CLOSE', i.user, `${oldEmbed.title} | ${paymentData.length} участников | ${totalAmount.toLocaleString()}$`);
+                logAction('CONTRACT_CLOSE', i.user, `${oldEmbed.title} | ${paymentData.length} участников`);
                 return i.editReply(`✅ Контракт закрыт, созданы кнопки для ${paymentData.length} участников.`);
             }
 
@@ -768,33 +779,27 @@ client.on('interactionCreate', async i => {
         if (i.isButton()) {
             logButton(i);
 
-            // [!] НОВАЯ КНОПКА ДЛЯ ОПЛАТЫ УЧАСТНИКА
+            // [!] НОВАЯ КНОПКА ДЛЯ ОПЛАТЫ УЧАСТНИКА (СУММА ИЗ БД!)
             if (i.customId.startsWith('pay_')) {
-                const parts = i.customId.replace('pay_', '').split('_');
-                const participantName = parts.slice(0, -1).join(' ');
-                const contractMsgId = parts[parts.length - 1];
+                // Получаем данные из БД по сообщению с кнопками
+                const paymentMsgId = i.message.id;
+                const payment = db.prepare('SELECT * FROM pending_payments WHERE paymentMsgId = ? AND paid = 0').get(paymentMsgId);
                 
-                const embed = i.message.embeds[0];
-                const description = embed?.description || '';
-                const lines = description.split('\n');
-                let amount = 0;
-                for (const line of lines) {
-                    if (line.includes(participantName) && line.includes('**')) {
-                        const match = line.match(/\*\*([\d, ]+)\s*\$/)
-                        if (match) amount = parseInt(match[1].replace(/\s/g, ''));
-                        break;
-                    }
+                if (!payment) {
+                    return i.reply({ content: '❌ Платёж не найден или уже оплачен.', flags: [MessageFlags.Ephemeral] });
                 }
+                
+                // Извлекаем имя участника из title (формат: "Название контракта - Имя участника")
+                const participantName = payment.title.split(' - ')[1] || 'Неизвестный участник';
+                const amount = payment.totalAmount;
 
-                if (amount <= 0) {
-                    return i.reply({ content: '❌ Сумма не найдена. Возможно, кнопка уже использована.', flags: [MessageFlags.Ephemeral] });
-                }
-
+                // Проверяем, есть ли скриншот
                 const messages = await i.channel.messages.fetch({ limit: 10 });
                 if (!messages.some(m => m.attachments.size > 0)) {
                     return i.reply({ content: '❌ Сначала прикрепите скриншот оплаты!', flags: [MessageFlags.Ephemeral] });
                 }
 
+                // Отключаем кнопку
                 const rows = i.message.components;
                 let updated = false;
                 for (const row of rows) {
@@ -814,6 +819,7 @@ client.on('interactionCreate', async i => {
                     await i.update({ components: rows });
                 }
 
+                // Создаём сообщение ожидания
                 const pendingMsg = await i.channel.send({
                     content: `⏳ **Ожидание подтверждения оплаты**\n` +
                              `👤 Участник: **${participantName}**\n` +
@@ -822,6 +828,7 @@ client.on('interactionCreate', async i => {
                              `Проверяющий, проверьте скриншот и ответьте на это сообщение командой \`!подтвердить\``
                 });
 
+                // Сохраняем данные об оплате
                 global.pendingMessages.set(pendingMsg.id, pendingMsg.id);
                 global.pendingPayments.set(pendingMsg.id, {
                     participantName: participantName,
@@ -933,17 +940,27 @@ client.on('interactionCreate', async i => {
                     rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
                 }
 
-                const totalAmount = paymentData.reduce((sum, p) => sum + p.amount, 0);
                 const payMsg = await payChannel.send({
                     content: CONFIG.ALLOWED_ROLES.map(r => `<@&${r}>`).join(' ') + ` | ${executorMentions}`,
                     embeds: [payEmbed],
                     components: rows
                 });
 
-                db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-                    .run(msgId, payMsg.id, creatorId, oldEmbed.title, totalAmount, Date.now(), Date.now() + 72 * 60 * 60 * 1000);
+                // [!] Сохраняем отдельную запись для КАЖДОГО участника
+                for (const p of paymentData) {
+                    db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+                        .run(
+                            msgId, 
+                            payMsg.id, 
+                            creatorId, 
+                            `${oldEmbed.title} - ${p.name}`, 
+                            p.amount, 
+                            Date.now(), 
+                            Date.now() + 72 * 60 * 60 * 1000
+                        );
+                }
 
-                logAction('CONTRACT_CLOSE_BUTTON', i.user, `${oldEmbed.title} | ${paymentData.length} участников | ${totalAmount.toLocaleString()}$`);
+                logAction('CONTRACT_CLOSE_BUTTON', i.user, `${oldEmbed.title} | ${paymentData.length} участников`);
                 return i.reply({ content: `✅ Контракт закрыт, созданы кнопки для ${paymentData.length} участников.`, flags: [MessageFlags.Ephemeral] });
             }
 
