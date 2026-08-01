@@ -64,16 +64,22 @@ function deductCritical(debtorName, amount) {
 function addManualPayment(title, amount, participants, creatorId) {
     const paymentId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
     const deadline = Date.now() + 72 * 60 * 60 * 1000;
-    db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline, paid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(`manual_${paymentId}`, `manual_${paymentId}`, creatorId, title, amount, Date.now(), deadline, 0);
-    participants.split(';').forEach(name => {
+    
+    // Разбиваем участников и создаём отдельную запись для каждого
+    const names = participants.split(';').filter(n => n.trim());
+    for (const name of names) {
         const trimmed = name.trim();
         if (trimmed) {
             const existing = db.prepare('SELECT amount FROM debtors WHERE name = ?').get(trimmed);
             if (existing) db.prepare('UPDATE debtors SET amount = amount + ? WHERE name = ?').run(amount, trimmed);
             else db.prepare('INSERT INTO debtors (name, amount) VALUES (?, ?)').run(trimmed, amount);
+            
+            // Создаём запись с именем участника в title
+            const fullTitle = `${title} - ${trimmed}`;
+            db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline, paid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(`manual_${paymentId}_${trimmed}`, `manual_${paymentId}_${trimmed}`, creatorId, fullTitle, amount, Date.now(), deadline, 0);
         }
-    });
+    }
     return paymentId;
 }
 
@@ -105,19 +111,28 @@ async function getPendingDetails(client, pendingRecords, CONFIG) {
     const payChannel = await client.channels.fetch(CONFIG.PAY);
     let result = '';
     
-    // Группируем записи по contractMsgId
     const grouped = new Map();
     for (const p of pendingRecords) {
-        const contractTitle = p.title.split(' - ')[0] || p.title;
-        if (!grouped.has(p.contractMsgId)) {
-            grouped.set(p.contractMsgId, {
-                title: contractTitle,
+        let groupId = p.contractMsgId;
+        let isManual = false;
+        if (groupId && groupId.startsWith('manual_')) {
+            isManual = true;
+            const parts = groupId.split('_');
+            if (parts.length >= 2) {
+                groupId = `${parts[0]}_${parts[1]}`;
+            }
+        }
+        
+        if (!grouped.has(groupId)) {
+            grouped.set(groupId, {
+                title: p.title.split(' - ')[0] || p.title,
                 participants: [],
                 totalAmount: 0,
-                deadline: p.deadline
+                deadline: p.deadline,
+                isManual: isManual
             });
         }
-        const group = grouped.get(p.contractMsgId);
+        const group = grouped.get(groupId);
         const participantName = p.title.split(' - ')[1] || 'Неизвестный участник';
         group.participants.push({ name: participantName, amount: p.totalAmount });
         group.totalAmount += p.totalAmount;
@@ -125,8 +140,7 @@ async function getPendingDetails(client, pendingRecords, CONFIG) {
     }
 
     for (const [contractMsgId, group] of grouped) {
-        const isManual = contractMsgId && contractMsgId.startsWith('manual_');
-        result += `💳 **${group.title}**${isManual ? ' (📝 ручная оплата)' : ''}\n`;
+        result += `💳 **${group.title}**${group.isManual ? ' (📝 ручная оплата)' : ''}\n`;
         for (const p of group.participants) {
             result += `   • ${p.name}: ${p.amount.toLocaleString()} $\n`;
         }

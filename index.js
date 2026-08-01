@@ -146,7 +146,7 @@ client.on('messageCreate', async msg => {
         return;
     }
 
-    // !подтвердить - ОБНОВЛЁННЫЙ С ПОИСКОМ ПО УПОМИНАНИЮ
+    // !подтвердить
     if (msg.channel.id === CONFIG.PAY && msg.content.trim() === '!подтвердить') {
         logMessage(msg);
         const hasRole = msg.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
@@ -184,7 +184,6 @@ client.on('messageCreate', async msg => {
                 return;
             }
 
-            // [!] ПОЛУЧАЕМ УПОМИНАНИЕ ДЛЯ ПОИСКА В ЭМБЕДЕ
             const memberInfo2 = getMembersInfo([participantName]);
             const mention2 = memberInfo2.mentions.length > 0 ? memberInfo2.mentions[0] : null;
             const searchPatterns2 = [participantName];
@@ -233,6 +232,7 @@ client.on('messageCreate', async msg => {
                                         const cleanLine = line
                                             .replace(/^[•-\s]+/, '')
                                             .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                            .replace(/⏳/g, '')
                                             .trim();
                                         if (!cleanLine) {
                                             const nameMatch = line.match(/\*\*([^*]+)\*\*/);
@@ -262,7 +262,6 @@ client.on('messageCreate', async msg => {
                 console.warn('Не удалось обновить сообщение с кнопками:', err);
             }
 
-            // [!] ПРОВЕРЯЕМ, ВСЕ ЛИ ОПЛАТИЛИ
             if (buttonMsg) {
                 try {
                     const freshMsg = await msg.channel.messages.fetch(buttonMessageId);
@@ -296,6 +295,7 @@ client.on('messageCreate', async msg => {
                                             const cleanLine = line
                                                 .replace(/^[•-\s]+/, '')
                                                 .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                                .replace(/⏳/g, '')
                                                 .trim();
                                             newLines.push(`   • ~~${cleanLine}~~ ✅`);
                                         } else {
@@ -554,50 +554,41 @@ client.on('interactionCreate', async i => {
                 const contractTitle = embed?.title || 'Неизвестный контракт';
                 const description = embed.description || '';
                 
-                // [!] НАХОДИМ СОЗДАТЕЛЯ
                 let creatorId = targetMsg.content.match(/<@!?(\d+)>/)?.[1] || 
                                 db.prepare('SELECT creatorId FROM active_contracts WHERE msgId = ?').get(targetMsg.id)?.creatorId;
                 if (!creatorId) {
                     return i.editReply('❌ Не найден создатель контракта.');
                 }
                 
-                // [!] ПРОВЕРЯЕМ, НЕТ ЛИ УЖЕ В БД
                 if (db.prepare('SELECT 1 FROM pending_payments WHERE contractMsgId = ?').get(targetMsg.id)) {
                     return i.editReply('⚠️ Этот контракт уже импортирован в БД.');
                 }
 
-                // [!] ИЗВЛЕКАЕМ УЧАСТНИКОВ И ИХ ДОЛГИ
                 const lines = description.split('\n');
                 const participants = [];
                 let inDebtSection = false;
                 let totalAmount = 0;
                 
                 for (const line of lines) {
-                    // Ищем секцию с долгами
                     if (line.includes('**Долги участников:**') || line.includes('Долги участников:')) {
                         inDebtSection = true;
                         continue;
                     }
                     
                     if (inDebtSection && (line.trim().startsWith('•') || line.trim().startsWith('-'))) {
-                        // Парсим строку типа: "• Artem: **25 000 $**" или "• <@123>: **25 000 $**"
                         const cleanLine = line.replace(/^[•-\s]+/, '').trim();
                         
-                        // Извлекаем имя (до двоеточия)
                         const nameMatch = cleanLine.match(/^([^:]+):/);
                         if (!nameMatch) continue;
                         
                         const rawName = nameMatch[1].trim();
-                        // Убираем упоминания из имени
                         const name = rawName.replace(/<@!?\d+>/g, '').trim();
                         
-                        // Извлекаем сумму (в ** или просто число)
                         let amount = 0;
                         const amountMatch = cleanLine.match(/\*\*([\d, ]+)\s*\$?/);
                         if (amountMatch) {
                             amount = parseInt(amountMatch[1].replace(/\s/g, ''));
                         } else {
-                            // Если без **, ищем просто число с $
                             const simpleMatch = cleanLine.match(/([\d, ]+)\s*\$?/);
                             if (simpleMatch) {
                                 amount = parseInt(simpleMatch[1].replace(/\s/g, ''));
@@ -615,19 +606,16 @@ client.on('interactionCreate', async i => {
                     return i.editReply('❌ Не найдены участники для оплаты.');
                 }
 
-                // [!] СОХРАНЯЕМ В БД и СОЗДАЁМ КНОПКИ
                 const payChannel = await client.channels.fetch(CONFIG.PAY);
                 if (!payChannel) {
                     return i.editReply('❌ Канал оплаты не найден.');
                 }
 
-                // Добавляем должников
                 for (const p of participants) {
                     db.prepare('INSERT OR REPLACE INTO debtors (name, amount) VALUES (?, IFNULL((SELECT amount FROM debtors WHERE name = ?), 0) + ?)')
                         .run(p.name, p.name, p.amount);
                 }
 
-                // Формируем эмбед для оплаты
                 let description2 = `**Исполнители:** ${targetMsg.content.match(/<@!?(\d+)>/g)?.join(' ') || 'Неизвестно'}\n\n`;
                 description2 += `Каждый участник должен оплатить свою долю в течение 72 часов.\n`;
                 description2 += `Проверяющий: после оплаты участника нажмите кнопку и ответьте \`!подтвердить\`\n\n`;
@@ -637,7 +625,6 @@ client.on('interactionCreate', async i => {
                 const paymentData = [];
                 
                 for (const p of participants) {
-                    // Находим discord ID для упоминания
                     const memberInfo = getMembersInfo([p.name]);
                     const memberMention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : p.name;
                     description2 += `• ${memberMention}: **${p.amount.toLocaleString()} $**\n`;
@@ -674,7 +661,6 @@ client.on('interactionCreate', async i => {
                     components: rows
                 });
 
-                // Сохраняем в pending_payments
                 for (const p of paymentData) {
                     db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
                         .run(
@@ -1032,10 +1018,8 @@ client.on('interactionCreate', async i => {
                     
                     const title = i.options.getString('название');
                     
-                    // Считаем сколько записей будет удалено
                     const count = db.prepare('SELECT COUNT(*) as count FROM pending_payments WHERE title LIKE ?').get(`%${title}%`);
                     
-                    // Удаляем из pending_payments
                     db.prepare('DELETE FROM pending_payments WHERE title LIKE ?').run(`%${title}%`);
                     
                     logAction('ADMIN', i.user, `Очищен контракт "${title}" | Удалено ${count.count} записей`);
@@ -1126,7 +1110,6 @@ client.on('interactionCreate', async i => {
         if (i.isButton()) {
             logButton(i);
 
-            // ===== НОВАЯ КНОПКА С АВТО-ОПЛАТОЙ ИЗ КОШЕЛЬКА =====
             if (i.customId.startsWith('pay_')) {
                 await i.deferReply({ flags: [MessageFlags.Ephemeral] });
                 
@@ -1139,13 +1122,11 @@ client.on('interactionCreate', async i => {
                 const participantName = payment.title.split(' - ')[1] || 'Неизвестный участник';
                 const amount = payment.totalAmount;
 
-                // [!] ПОЛУЧАЕМ УПОМИНАНИЕ ДЛЯ ПОИСКА В ЭМБЕДЕ
                 const memberInfo = getMembersInfo([participantName]);
                 const mention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : null;
                 const searchPatterns = [participantName];
                 if (mention) searchPatterns.push(mention);
 
-                // [!] ПРОВЕРЯЕМ КОШЕЛЁК
                 const wallet = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(participantName);
                 let walletAmount = wallet ? wallet.balance : 0;
                 let remainingAmount = amount;
@@ -1171,7 +1152,6 @@ client.on('interactionCreate', async i => {
                     needManualPayment = true;
                 }
 
-                // [!] Если не хватает — запрашиваем скриншот
                 if (needManualPayment && remainingAmount > 0) {
                     const messages = await i.channel.messages.fetch({ limit: 20 });
                     const userMessage = messages.find(m => m.author.id === i.user.id && m.attachments.size > 0);
@@ -1186,7 +1166,6 @@ client.on('interactionCreate', async i => {
                     }
                 }
 
-                // Отключаем кнопку
                 const rows = i.message.components;
                 let updated = false;
                 for (const row of rows) {
@@ -1209,7 +1188,7 @@ client.on('interactionCreate', async i => {
                     return i.editReply({ content: '❌ Не удалось найти кнопку.' });
                 }
 
-                // [!] СРАЗУ ЗАЧЁРКИВАЕМ В ЭМБЕДЕ (до подтверждения!)
+                // Сразу зачёркиваем в эмбеде (до подтверждения!)
                 try {
                     const embed = i.message.embeds[0];
                     if (embed) {
@@ -1248,7 +1227,7 @@ client.on('interactionCreate', async i => {
                     await i.message.edit({ components: rows });
                 }
 
-                // [!] Полностью из кошелька — сразу подтверждаем
+                // Полностью из кошелька — сразу подтверждаем
                 if (!needManualPayment) {
                     const newWallet = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(participantName);
                     const newBalance = newWallet ? newWallet.balance : 0;
@@ -1260,6 +1239,7 @@ client.on('interactionCreate', async i => {
                     db.prepare(`INSERT INTO paid_markers (debtorName, contractTitle, amount, markedBy, createdAt) VALUES (?, ?, ?, ?, ?)`)
                         .run(participantName, payment.title.split(' - ')[0] || 'Неизвестный контракт', amount, i.user.id, Date.now());
                     
+                    // Обновляем эмбед — убираем ⏳ и ставим ✅
                     try {
                         const embed = i.message.embeds[0];
                         if (embed) {
@@ -1275,21 +1255,26 @@ client.on('interactionCreate', async i => {
                                     continue;
                                 }
                                 if (inDebtSection) {
-                                    const matches = searchPatterns.some(pattern => line.includes(pattern));
-                                    if (matches && line.includes('⏳ (ожидает подтверждения)')) {
-                                        const cleanLine = line
+                                    // Ищем по имени или упоминанию
+                                    const matches = searchPatterns.some(pattern => line.includes(pattern)) || 
+                                                     line.includes(participantName) ||
+                                                     (mention && line.includes(mention));
+                                    // Проверяем наличие ⏳ в строке
+                                    const hasPending = line.includes('⏳') || line.includes('ожидает подтверждения');
+                                    if (matches && hasPending) {
+                                        let cleanLine = line
                                             .replace(/^[•-\s]+/, '')
                                             .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                            .replace(/⏳/g, '')
                                             .trim();
                                         if (!cleanLine) {
                                             const nameMatch = line.match(/\*\*([^*]+)\*\*/);
                                             const amountMatch = line.match(/\*\*([\d, ]+)\s*\$?/);
                                             const name = nameMatch ? nameMatch[1].trim() : participantName;
                                             const amountStr = amountMatch ? amountMatch[1] : amount.toLocaleString();
-                                            newLines.push(`   • ~~${name}: ${amountStr} $~~ ✅`);
-                                        } else {
-                                            newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                            cleanLine = `${name}: ${amountStr} $`;
                                         }
+                                        newLines.push(`   • ~~${cleanLine}~~ ✅`);
                                         found = true;
                                     } else {
                                         newLines.push(line);
@@ -1301,21 +1286,23 @@ client.on('interactionCreate', async i => {
                             if (!found) {
                                 for (const line of lines) {
                                     if (inDebtSection) {
-                                        const matches = searchPatterns.some(pattern => line.includes(pattern));
+                                        const matches = searchPatterns.some(pattern => line.includes(pattern)) || 
+                                                         line.includes(participantName) ||
+                                                         (mention && line.includes(mention));
                                         if (matches) {
-                                            const cleanLine = line
+                                            let cleanLine = line
                                                 .replace(/^[•-\s]+/, '')
                                                 .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                                .replace(/⏳/g, '')
                                                 .trim();
                                             if (!cleanLine) {
                                                 const nameMatch = line.match(/\*\*([^*]+)\*\*/);
                                                 const amountMatch = line.match(/\*\*([\d, ]+)\s*\$?/);
                                                 const name = nameMatch ? nameMatch[1].trim() : participantName;
                                                 const amountStr = amountMatch ? amountMatch[1] : amount.toLocaleString();
-                                                newLines.push(`   • ~~${name}: ${amountStr} $~~ ✅`);
-                                            } else {
-                                                newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                                cleanLine = `${name}: ${amountStr} $`;
                                             }
+                                            newLines.push(`   • ~~${cleanLine}~~ ✅`);
                                             break;
                                         }
                                     }
@@ -1362,6 +1349,7 @@ client.on('interactionCreate', async i => {
                                                 const cleanLine = line
                                                     .replace(/^[•-\s]+/, '')
                                                     .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                                    .replace(/⏳/g, '')
                                                     .trim();
                                                 newLines.push(`   • ~~${cleanLine}~~ ✅`);
                                             } else {
@@ -1398,7 +1386,7 @@ client.on('interactionCreate', async i => {
                     });
                 }
 
-                // [!] Частичная оплата или полностью наличными
+                // Частичная оплата или полностью наличными
                 let messageContent = `⏳ **Ожидание подтверждения оплаты**\n`;
                 messageContent += `👤 Участник: **${participantName}**\n`;
                 messageContent += `💰 Сумма: **${amount.toLocaleString()} $**\n`;
