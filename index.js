@@ -814,9 +814,8 @@ client.on('interactionCreate', async i => {
         if (i.isButton()) {
             logButton(i);
 
-            // [!] НОВАЯ КНОПКА ДЛЯ ОПЛАТЫ УЧАСТНИКА (СУММА ИЗ БД ПО paymentMsgId = customId!)
+            // ===== НОВАЯ КНОПКА С АВТО-ОПЛАТОЙ ИЗ КОШЕЛЬКА =====
             if (i.customId.startsWith('pay_')) {
-                // [!] Ищем в БД по paymentMsgId = i.customId (уникальный ID!)
                 const payment = db.prepare('SELECT * FROM pending_payments WHERE paymentMsgId = ? AND paid = 0').get(i.customId);
                 
                 if (!payment) {
@@ -826,11 +825,48 @@ client.on('interactionCreate', async i => {
                 const participantName = payment.title.split(' - ')[1] || 'Неизвестный участник';
                 const amount = payment.totalAmount;
 
-                const messages = await i.channel.messages.fetch({ limit: 10 });
-                if (!messages.some(m => m.attachments.size > 0)) {
-                    return i.reply({ content: '❌ Сначала прикрепите скриншот оплаты!', flags: [MessageFlags.Ephemeral] });
+                // [!] ПРОВЕРЯЕМ КОШЕЛЁК
+                const wallet = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(participantName);
+                let walletAmount = wallet ? wallet.balance : 0;
+                let remainingAmount = amount;
+                let paidFromWallet = 0;
+                let needManualPayment = false;
+                
+                if (walletAmount > 0) {
+                    if (walletAmount >= amount) {
+                        paidFromWallet = amount;
+                        remainingAmount = 0;
+                        db.prepare('UPDATE wallets SET balance = balance - ?, updatedAt = ? WHERE playerName = ?')
+                            .run(amount, Date.now(), participantName);
+                        logAction('WALLET_AUTO_PAY', i.user, `${participantName} | ${amount.toLocaleString()}$ (полностью из кошелька)`);
+                    } else {
+                        paidFromWallet = walletAmount;
+                        remainingAmount = amount - walletAmount;
+                        needManualPayment = true;
+                        db.prepare('UPDATE wallets SET balance = 0, updatedAt = ? WHERE playerName = ?')
+                            .run(Date.now(), participantName);
+                        logAction('WALLET_AUTO_PAY', i.user, `${participantName} | ${paidFromWallet.toLocaleString()}$ из кошелька, осталось ${remainingAmount.toLocaleString()}$`);
+                    }
+                } else {
+                    needManualPayment = true;
                 }
 
+                // [!] Если не хватает — запрашиваем скриншот
+                if (needManualPayment && remainingAmount > 0) {
+                    const messages = await i.channel.messages.fetch({ limit: 10 });
+                    if (!messages.some(m => m.attachments.size > 0)) {
+                        return i.reply({ 
+                            content: `❌ На кошельке **${participantName}** недостаточно средств!\n` +
+                                     `💰 В кошельке: ${walletAmount.toLocaleString()} $\n` +
+                                     `💳 Нужно оплатить: ${amount.toLocaleString()} $\n` +
+                                     `📌 Остаток к оплате: ${remainingAmount.toLocaleString()} $\n\n` +
+                                     `Прикрепите скриншот оплаты на ${remainingAmount.toLocaleString()} $ и нажмите кнопку снова.`, 
+                            flags: [MessageFlags.Ephemeral] 
+                        });
+                    }
+                }
+
+                // Отключаем кнопку
                 const rows = i.message.components;
                 let updated = false;
                 for (const row of rows) {
@@ -850,24 +886,66 @@ client.on('interactionCreate', async i => {
                     await i.update({ components: rows });
                 }
 
-                const pendingMsg = await i.channel.send({
-                    content: `⏳ **Ожидание подтверждения оплаты**\n` +
-                             `👤 Участник: **${participantName}**\n` +
-                             `💰 Сумма: **${amount.toLocaleString()} $**\n` +
-                             `🔄 Оплата от <@${i.user.id}>\n\n` +
-                             `Проверяющий, проверьте скриншот и ответьте на это сообщение командой \`!подтвердить\``
-                });
+                // [!] Полностью из кошелька — сразу подтверждаем
+                if (!needManualPayment) {
+                    deductDebt(participantName, amount);
+                    db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(amount);
+                    db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(i.customId);
+                    
+                    db.prepare(`INSERT INTO paid_markers (debtorName, contractTitle, amount, markedBy, createdAt) VALUES (?, ?, ?, ?, ?)`)
+                        .run(participantName, payment.title.split(' - ')[0] || 'Неизвестный контракт', amount, i.user.id, Date.now());
+                    
+                    try {
+                        const embed = i.message.embeds[0];
+                        if (embed) {
+                            const desc = embed.description || '';
+                            const newDesc = desc.replace(
+                                new RegExp(`• <@!?\\d+>?\\s*\\*\\*${participantName}.*?\\n`, 'g'),
+                                `• ~~${participantName}~~ ✅ **${amount.toLocaleString()} $** (💰 из кошелька)\n`
+                            );
+                            const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
+                            await i.message.edit({ embeds: [newEmbed], components: i.message.components });
+                        }
+                    } catch (err) {
+                        console.warn('Не удалось обновить эмбед:', err);
+                    }
+                    
+                    logAction('WALLET_PAY_CONFIRM', i.user, `${participantName} | ${amount.toLocaleString()}$ (авто из кошелька)`);
+                    return i.followUp({ 
+                        content: `✅ Оплата **${participantName}** автоматически списана с кошелька!\n` +
+                                 `💰 Сумма: ${amount.toLocaleString()} $\n` +
+                                 `📌 Остаток на кошельке: 0 $`, 
+                        flags: [MessageFlags.Ephemeral] 
+                    });
+                }
+
+                // [!] Частичная оплата или полностью наличными
+                let messageContent = `⏳ **Ожидание подтверждения оплаты**\n`;
+                messageContent += `👤 Участник: **${participantName}**\n`;
+                messageContent += `💰 Сумма: **${amount.toLocaleString()} $**\n`;
+                if (paidFromWallet > 0) {
+                    messageContent += `💳 Оплачено с кошелька: **${paidFromWallet.toLocaleString()} $**\n`;
+                    messageContent += `📌 Остаток к оплате: **${remainingAmount.toLocaleString()} $**\n`;
+                }
+                messageContent += `🔄 Оплата от <@${i.user.id}>\n\n`;
+                messageContent += `Проверяющий, проверьте скриншот и ответьте на это сообщение командой \`!подтвердить\``;
+
+                const pendingMsg = await i.channel.send({ content: messageContent });
 
                 global.pendingMessages.set(pendingMsg.id, pendingMsg.id);
                 global.pendingPayments.set(pendingMsg.id, {
                     participantName: participantName,
-                    amount: amount,
-                    buttonMessageId: i.message.id
+                    amount: remainingAmount,
+                    buttonMessageId: i.message.id,
+                    paidFromWallet: paidFromWallet,
+                    totalAmount: amount
                 });
 
-                logAction('PAY_BUTTON', i.user, `${participantName} | ${amount.toLocaleString()}$`);
+                logAction('PAY_BUTTON', i.user, `${participantName} | ${amount.toLocaleString()}$ (${paidFromWallet > 0 ? paidFromWallet.toLocaleString() + '$ из кошелька' : 'наличными'})`);
                 return i.followUp({ 
-                    content: `✅ Кнопка для **${participantName}** нажата. Ожидайте подтверждения проверяющего.`, 
+                    content: `✅ Кнопка для **${participantName}** нажата.\n` +
+                             (paidFromWallet > 0 ? `💳 С кошелька списано: ${paidFromWallet.toLocaleString()} $\n` : '') +
+                             `📌 Ожидайте подтверждения проверяющего.`, 
                     flags: [MessageFlags.Ephemeral] 
                 });
             }
@@ -950,7 +1028,6 @@ client.on('interactionCreate', async i => {
                     const memberMention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : p.name;
                     description += `• ${memberMention}: **${p.amount.toLocaleString()} $**\n`;
                     
-                    // [!] ГЕНЕРИРУЕМ УНИКАЛЬНЫЙ ID
                     const uniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
                     const customId = `pay_${uniqueId}`;
                     buttons.push(
@@ -977,14 +1054,13 @@ client.on('interactionCreate', async i => {
                     components: rows
                 });
 
-                // [!] Сохраняем запись для КАЖДОГО участника с УНИКАЛЬНЫМ paymentMsgId
                 for (let i = 0; i < paymentData.length; i++) {
                     const p = paymentData[i];
                     const customId = buttons[i].data.custom_id;
                     db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
                         .run(
                             msgId, 
-                            customId,  // <-- УНИКАЛЬНЫЙ ID!
+                            customId,
                             creatorId, 
                             `${oldEmbed.title} - ${p.name}`, 
                             p.amount, 
