@@ -1107,6 +1107,7 @@ client.on('interactionCreate', async i => {
 
             // ===== НОВАЯ КНОПКА С АВТО-ОПЛАТОЙ ИЗ КОШЕЛЬКА =====
             if (i.customId.startsWith('pay_')) {
+                await i.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const payment = db.prepare('SELECT * FROM pending_payments WHERE paymentMsgId = ? AND paid = 0').get(i.customId);
                 
                 if (!payment) {
@@ -1443,7 +1444,7 @@ client.on('interactionCreate', async i => {
 
             const nicknames = nicknamesRaw.split(';');
             const bills = billsRaw.split(';');
-            if (nicknames.length !== bills.length) return i.editReply('❌ Количество ников != векселей.');
+            if (nicknames.length !== bills.length) return i.editReply('❌ Количество ников не соответствует векселям.');
 
             const [h, m] = timeRaw.split(':').map(Number);
             const endTime = Date.now() + (h * 60 + m) * 60 * 1000;
