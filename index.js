@@ -806,6 +806,27 @@ client.on('interactionCreate', async i => {
                         flags: [MessageFlags.Ephemeral] 
                     });
                 }
+                case 'очистить_контракт': {
+                    const hasRole = i.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
+                    if (!hasRole) {
+                        logAction('WARN', i.user, 'Попытка очистить контракт без прав');
+                        return i.reply({ content: '❌ Нет прав.', flags: [MessageFlags.Ephemeral] });
+                    }
+                    
+                    const title = i.options.getString('название');
+                    
+                    // Считаем сколько записей будет удалено
+                    const count = db.prepare('SELECT COUNT(*) as count FROM pending_payments WHERE title LIKE ?').get(`%${title}%`);
+                    
+                    // Удаляем из pending_payments
+                    db.prepare('DELETE FROM pending_payments WHERE title LIKE ?').run(`%${title}%`);
+                    
+                    logAction('ADMIN', i.user, `Очищен контракт "${title}" | Удалено ${count.count} записей`);
+                    return i.reply({ 
+                        content: `✅ Контракт **"${title}"** очищен!\n📌 Удалено записей: ${count.count}`,
+                        flags: [MessageFlags.Ephemeral] 
+                    });
+                }
             }
             return;
         }

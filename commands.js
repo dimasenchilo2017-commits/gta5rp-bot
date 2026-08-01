@@ -22,6 +22,7 @@ module.exports = [
     new SlashCommandBuilder().setName('внести_в_кошелек').setDescription('Добавить деньги в кошелёк игрока').addStringOption(o => o.setName('ник').setDescription('Ник игрока').setRequired(true)).addIntegerOption(o => o.setName('сумма').setDescription('Сумма').setRequired(true)),
     new SlashCommandBuilder().setName('кошелек').setDescription('Показать баланс кошелька игрока').addStringOption(o => o.setName('ник').setDescription('Ник игрока').setRequired(true)),
     new SlashCommandBuilder().setName('оплатить_с_кошелька').setDescription('Оплатить с кошелька').addStringOption(o => o.setName('ник').setDescription('Ник игрока').setRequired(true)).addStringOption(o => o.setName('контракт').setDescription('Название контракта').setRequired(true)).addIntegerOption(o => o.setName('сумма_долга').setDescription('Сумма долга').setRequired(true)),
+    new SlashCommandBuilder().setName('очистить_контракт').setDescription('Удалить все записи по названию контракта (админ)').addStringOption(o => o.setName('название').setDescription('Название контракта').setRequired(true)),
     new SlashCommandBuilder().setName('удалить_контракт').setDescription('Принудительно удалить контракт из БД (без редактирования сообщения)').addStringOption(o => o.setName('msgid').setDescription('ID сообщения с контрактом').setRequired(true)),
     { name: 'Импортировать контракт', type: ApplicationCommandType.Message },
     { name: 'Закрыть контракт', type: ApplicationCommandType.Message },
