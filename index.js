@@ -25,6 +25,7 @@ const CONFIG = {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 if (!global.pendingMessages) global.pendingMessages = new Map();
+if (!global.pendingPayments) global.pendingPayments = new Map();
 
 process.on('unhandledRejection', error => console.error('Unhandled rejection:', error));
 process.on('uncaughtException', err => console.error('Uncaught exception:', err));
@@ -145,7 +146,7 @@ client.on('messageCreate', async msg => {
         return;
     }
 
-    // !подтвердить
+    // !подтвердить - ОБНОВЛЁННЫЙ
     if (msg.channel.id === CONFIG.PAY && msg.content.trim() === '!подтвердить') {
         logMessage(msg);
         const hasRole = msg.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
@@ -167,76 +168,80 @@ client.on('messageCreate', async msg => {
                 setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 3000);
                 return;
             }
-            if (!targetMsg.embeds?.[0]?.fields?.length) {
-                const reply = await msg.reply('❌ Это не сообщение с платежом.');
+
+            const paymentData = global.pendingPayments?.get(targetMsg.id);
+            if (!paymentData) {
+                const reply = await msg.reply('❌ Нет данных об оплате.');
                 setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 3000);
                 return;
             }
 
-            logAction('PAYMENT', msg.author, `!подтвердить для ${targetMsg.embeds[0]?.title || 'неизвестно'}`);
-            const contractTitle = targetMsg.embeds[0]?.title || 'Неизвестный контракт';
+            const { participantName, amount, buttonMessageId } = paymentData;
             
-            db.prepare('DELETE FROM paid_markers WHERE contractTitle = ?').run(contractTitle);
+            if (amount <= 0) {
+                const reply = await msg.reply('❌ Сумма не найдена.');
+                setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 3000);
+                return;
+            }
 
-            let totalPaid = 0;
-            const participants = [];
-            targetMsg.embeds[0].fields.forEach(field => {
-                const amount = parseInt(field.value.replace(/\D/g, '')) || 0;
-                if (amount > 0) {
-                    participants.push({ name: field.name, amount });
-                    deductDebt(field.name, amount);
-                    totalPaid += amount;
-                }
-            });
+            logAction('PAYMENT', msg.author, `${participantName} | ${amount.toLocaleString()}$`);
 
-            db.prepare('DELETE FROM debtors WHERE amount <= 0').run();
-            if (totalPaid > 0) db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(totalPaid);
-            db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(targetMsg.id);
+            deductDebt(participantName, amount);
+            db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(amount);
+            db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(buttonMessageId);
 
             try {
-                let details = `✅ **Оплата подтверждена!** Проверяющий: <@${msg.author.id}>\n\n`;
-                details += `📋 **${contractTitle}**\n`;
-                participants.forEach(p => {
-                    details += `• **${p.name}**: ${p.amount.toLocaleString()} $\n`;
-                });
-                details += `\n💰 Итого в казну: ${totalPaid.toLocaleString()} $`;
-                
-                await targetMsg.edit({ 
-                    content: details, 
-                    components: [] 
-                });
-                logAction('PAYMENT', msg.author, `Обновлено сообщение ${targetMsg.id}, сумма ${totalPaid.toLocaleString()}$`);
-            } catch (editErr) {
-                console.warn('Не удалось отредактировать сообщение:', editErr);
-                try {
-                    await targetMsg.delete();
-                    await msg.channel.send({
-                        content: `✅ **Оплата подтверждена!** Проверяющий: <@${msg.author.id}>\n\n📋 **${contractTitle}**\n${participants.map(p => `• **${p.name}**: ${p.amount.toLocaleString()} $`).join('\n')}\n\n💰 Итого в казну: ${totalPaid.toLocaleString()} $`
-                    });
-                } catch (err) {
-                    console.warn('Не удалось удалить сообщение:', err);
+                const buttonMsg = await msg.channel.messages.fetch(buttonMessageId);
+                if (buttonMsg && buttonMsg.components && buttonMsg.components.length > 0) {
+                    const rows = buttonMsg.components;
+                    let updated = false;
+                    for (const row of rows) {
+                        for (const comp of row.components) {
+                            if (comp.customId && comp.customId.includes(participantName.replace(/\s/g, '_'))) {
+                                const disabledButton = ButtonBuilder.from(comp).setDisabled(true);
+                                const index = row.components.indexOf(comp);
+                                row.components[index] = disabledButton;
+                                updated = true;
+                                break;
+                            }
+                        }
+                        if (updated) break;
+                    }
+                    if (updated) {
+                        const embed = buttonMsg.embeds[0];
+                        if (embed) {
+                            const desc = embed.description || '';
+                            const newDesc = desc.replace(
+                                new RegExp(`• <@!?\\d+>?\\s*\\*\\*${participantName}.*?\\n`, 'g'),
+                                `• ~~${participantName}~~ ✅ **${amount.toLocaleString()} $**\n`
+                            );
+                            const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
+                            await buttonMsg.edit({ embeds: [newEmbed], components: rows });
+                        } else {
+                            await buttonMsg.edit({ components: rows });
+                        }
+                    }
                 }
+            } catch (err) {
+                console.warn('Не удалось обновить сообщение с кнопками:', err);
             }
 
             const pendingMsgId = global.pendingMessages?.get(targetMsg.id);
             if (pendingMsgId) {
                 try {
                     const pendingMsg = await msg.channel.messages.fetch(pendingMsgId);
-                    if (pendingMsg) {
-                        await pendingMsg.delete();
-                        logAction('DELETE', msg.author, `Удалено сообщение ожидания ${pendingMsgId}`);
-                    }
-                } catch (err) {
-                    console.warn('Не удалось найти/удалить сообщение ожидания:', err);
-                }
+                    if (pendingMsg) await pendingMsg.delete();
+                } catch (err) {}
                 global.pendingMessages.delete(targetMsg.id);
             }
 
-            const replyMsg = await msg.reply('✅ Контракт закрыт, долги обновлены.');
+            global.pendingPayments.delete(targetMsg.id);
+
+            const replyMsg = await msg.reply(`✅ Оплата для **${participantName}** подтверждена! (${amount.toLocaleString()} $)`);
             setTimeout(async () => {
                 await msg.delete().catch(() => {});
                 await replyMsg.delete().catch(() => {});
-            }, 3000);
+            }, 5000);
 
         } catch (err) {
             console.error('[ERROR] !подтвердить:', err);
@@ -302,25 +307,6 @@ client.on('interactionCreate', async i => {
                 const membersInfo = getMembersInfo(participantNames);
                 const executorMentions = membersInfo.mentions.join(' ');
 
-                const payEmbed = new EmbedBuilder()
-                    .setTitle(oldEmbed.title)
-                    .setColor(0x00FF00)
-                    .setDescription(
-                        `**Исполнитель:** ${executorMentions}\n\n` +
-                        `${executorMentions} внесите сумму в казну и обязательно приложите скриншот!\n` +
-                        `**Проверяющий:** ответьте \`!подтвердить\`\n` +
-                        `**Оплатить нужно в течении 72 часов, иначе будут налагаться просрочки про просрочки читайте в** <#1374377052509179994>`
-                    );
-
-                let totalPayAmount = 0;
-                participants.forEach(f => {
-                    const toPay = Math.round((parseInt(f.value.replace(/\D/g, '')) || 0) * 1000 * multiplier);
-                    totalPayAmount += toPay;
-                    db.prepare('INSERT OR REPLACE INTO debtors (name, amount) VALUES (?, IFNULL((SELECT amount FROM debtors WHERE name = ?), 0) + ?)')
-                        .run(f.name, f.name, toPay);
-                    payEmbed.addFields({ name: f.name, value: `${toPay.toLocaleString()} $` });
-                });
-
                 await i.targetMessage.edit({
                     content: `✅ Статус: **УСПЕХ ✅**`,
                     components: [],
@@ -328,23 +314,64 @@ client.on('interactionCreate', async i => {
                 }).catch(() => {});
 
                 const payChannel = await client.channels.fetch(CONFIG.PAY);
-                if (payChannel) {
-                    const rolePings = CONFIG.ALLOWED_ROLES.map(r => `<@&${r}>`).join(' ');
-                    let pingContent = rolePings + ` | <@${contract.creatorId}>`;
-                    if (executorMentions) pingContent += ` | Исполнители: ${executorMentions}`;
+                if (!payChannel) return i.editReply('❌ Канал оплаты не найден.');
 
-                    const payMsg = await payChannel.send({
-                        content: pingContent,
-                        embeds: [payEmbed],
-                        components: [new ActionRowBuilder().addComponents(
-                            new ButtonBuilder().setCustomId('pay_confirm').setLabel('Оплатить').setStyle(ButtonStyle.Success)
-                        )]
-                    });
-                    db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-                        .run(msgId, payMsg.id, contract.creatorId, oldEmbed.title, totalPayAmount, Date.now(), Date.now() + 72 * 60 * 60 * 1000);
-                    logAction('CONTRACT_CLOSE', i.user, `${oldEmbed.title} | Сумма: ${totalPayAmount.toLocaleString()}$`);
+                const paymentData = [];
+                for (const participant of participants) {
+                    const name = participant.name;
+                    const billValue = parseInt(participant.value.replace(/\D/g, '')) || 0;
+                    const toPay = Math.round(billValue * 1000 * multiplier);
+                    if (toPay <= 0) continue;
+                    
+                    paymentData.push({ name, amount: toPay });
+                    db.prepare('INSERT OR REPLACE INTO debtors (name, amount) VALUES (?, IFNULL((SELECT amount FROM debtors WHERE name = ?), 0) + ?)')
+                        .run(name, name, toPay);
                 }
-                return i.editReply('✅ Контракт закрыт как УСПЕХ.');
+
+                if (paymentData.length === 0) return i.editReply('❌ Нет участников для оплаты.');
+
+                let description = `**Исполнители:** ${executorMentions}\n\n`;
+                description += `Каждый участник должен оплатить свою долю в течение 72 часов.\n`;
+                description += `Проверяющий: после оплаты участника нажмите кнопку и ответьте \`!подтвердить\`\n\n`;
+                description += `**Долги участников:**\n`;
+                
+                const buttons = [];
+                for (const p of paymentData) {
+                    const memberInfo = getMembersInfo([p.name]);
+                    const memberMention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : p.name;
+                    description += `• ${memberMention}: **${p.amount.toLocaleString()} $**\n`;
+                    
+                    const customId = `pay_${p.name.replace(/\s/g, '_')}_${msgId}`;
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setCustomId(customId)
+                            .setLabel(`Оплатить ${p.name}`)
+                            .setStyle(ButtonStyle.Success)
+                    );
+                }
+
+                const payEmbed = new EmbedBuilder()
+                    .setTitle(oldEmbed.title)
+                    .setColor(0x00FF00)
+                    .setDescription(description);
+
+                const rows = [];
+                for (let i = 0; i < buttons.length; i += 5) {
+                    rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+                }
+
+                const totalAmount = paymentData.reduce((sum, p) => sum + p.amount, 0);
+                const payMsg = await payChannel.send({
+                    content: CONFIG.ALLOWED_ROLES.map(r => `<@&${r}>`).join(' ') + ` | ${executorMentions}`,
+                    embeds: [payEmbed],
+                    components: rows
+                });
+
+                db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+                    .run(msgId, payMsg.id, contract.creatorId, oldEmbed.title, totalAmount, Date.now(), Date.now() + 72 * 60 * 60 * 1000);
+
+                logAction('CONTRACT_CLOSE', i.user, `${oldEmbed.title} | ${paymentData.length} участников | ${totalAmount.toLocaleString()}$`);
+                return i.editReply(`✅ Контракт закрыт, созданы кнопки для ${paymentData.length} участников.`);
             }
 
             if (i.commandName === 'Напомнить о закрытии') {
@@ -689,7 +716,6 @@ client.on('interactionCreate', async i => {
                     const amount = i.options.getInteger('сумма');
                     const newAmount = Math.round(amount * 1.25);
                     
-                    // [!] СПИСЫВАЕМ СТАРЫЙ ДОЛГ
                     const currentDebt = db.prepare('SELECT amount FROM debtors WHERE name = ?').get(nick);
                     const remainingDebt = currentDebt ? Math.max(0, currentDebt.amount - amount) : 0;
                     
@@ -699,7 +725,6 @@ client.on('interactionCreate', async i => {
                         db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(remainingDebt, nick);
                     }
                     
-                    // [!] ДОБАВЛЯЕМ ПРОСРОЧКУ ТОЛЬКО В overdue (НЕ В debtors!)
                     const deadline = Date.now() + 48 * 60 * 60 * 1000;
                     db.prepare(`INSERT INTO overdue (debtorName, amount, deadline, createdAt) VALUES (?, ?, ?, ?)`)
                         .run(nick, newAmount, deadline, Date.now());
@@ -716,7 +741,6 @@ client.on('interactionCreate', async i => {
                     const amount = i.options.getInteger('сумма');
                     const newAmount = Math.round(amount * 1.25);
                     
-                    // [!] СПИСЫВАЕМ СТАРЫЙ ДОЛГ
                     const currentDebt = db.prepare('SELECT amount FROM debtors WHERE name = ?').get(nick);
                     const remainingDebt = currentDebt ? Math.max(0, currentDebt.amount - amount) : 0;
                     
@@ -726,7 +750,6 @@ client.on('interactionCreate', async i => {
                         db.prepare('UPDATE debtors SET amount = ? WHERE name = ?').run(remainingDebt, nick);
                     }
                     
-                    // [!] ДОБАВЛЯЕМ КРИТИЧЕСКУЮ ПРОСРОЧКУ ТОЛЬКО В critical_overdue (НЕ В debtors!)
                     const deadline = Date.now() + 48 * 60 * 60 * 1000;
                     db.prepare(`INSERT INTO critical_overdue (debtorName, amount, deadline, createdAt) VALUES (?, ?, ?, ?)`)
                         .run(nick, newAmount, deadline, Date.now());
@@ -745,32 +768,72 @@ client.on('interactionCreate', async i => {
         if (i.isButton()) {
             logButton(i);
 
-            if (i.customId.startsWith('manual_pay_')) {
-                const paymentId = i.customId.replace('manual_pay_', '');
-                const contractMsgId = `manual_${paymentId}`;
-                const payment = db.prepare('SELECT * FROM pending_payments WHERE contractMsgId = ? AND paid = 0').get(contractMsgId);
-                if (!payment) return i.reply({ content: '❌ Оплата не найдена.', flags: [MessageFlags.Ephemeral] });
-                const isAdmin = i.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
-                if (i.user.id !== payment.creatorId && !isAdmin) return i.reply({ content: '❌ Нет прав.', flags: [MessageFlags.Ephemeral] });
-                db.prepare('UPDATE pending_payments SET paid = 1 WHERE contractMsgId = ?').run(contractMsgId);
-                const targetMsg = await i.channel.messages.fetch(i.message.id);
-                if (targetMsg && targetMsg.embeds && targetMsg.embeds[0]) {
-                    const desc = targetMsg.embeds[0].description || '';
-                    const match = desc.match(/👥 \*\*Участники:\*\*\n([\s\S]*?)(?=\n\n|$)/);
-                    if (match) {
-                        match[1].split('\n').forEach(line => {
-                            const m = line.match(/• (.+)/);
-                            if (m) deductDebt(m[1].trim(), payment.totalAmount);
-                        });
+            // [!] НОВАЯ КНОПКА ДЛЯ ОПЛАТЫ УЧАСТНИКА
+            if (i.customId.startsWith('pay_')) {
+                const parts = i.customId.replace('pay_', '').split('_');
+                const participantName = parts.slice(0, -1).join(' ');
+                const contractMsgId = parts[parts.length - 1];
+                
+                const embed = i.message.embeds[0];
+                const description = embed?.description || '';
+                const lines = description.split('\n');
+                let amount = 0;
+                for (const line of lines) {
+                    if (line.includes(participantName) && line.includes('**')) {
+                        const match = line.match(/\*\*([\d, ]+)\s*\$/)
+                        if (match) amount = parseInt(match[1].replace(/\s/g, ''));
+                        break;
                     }
                 }
-                const updatedEmbed = EmbedBuilder.from(i.message.embeds[0])
-                    .setColor(0xFFA500)
-                    .setDescription(i.message.embeds[0].description.replace('⏳ Ожидание', '✅ ОПЛАЧЕНО!'));
-                await i.update({ embeds: [updatedEmbed], components: [] });
-                db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(payment.totalAmount);
-                logAction('MANUAL_PAY_CONFIRM', i.user, `${payment.title} | ${payment.totalAmount.toLocaleString()}$`);
-                return i.followUp({ content: `✅ Оплата подтверждена! +${payment.totalAmount.toLocaleString()} $`, flags: [MessageFlags.Ephemeral] });
+
+                if (amount <= 0) {
+                    return i.reply({ content: '❌ Сумма не найдена. Возможно, кнопка уже использована.', flags: [MessageFlags.Ephemeral] });
+                }
+
+                const messages = await i.channel.messages.fetch({ limit: 10 });
+                if (!messages.some(m => m.attachments.size > 0)) {
+                    return i.reply({ content: '❌ Сначала прикрепите скриншот оплаты!', flags: [MessageFlags.Ephemeral] });
+                }
+
+                const rows = i.message.components;
+                let updated = false;
+                for (const row of rows) {
+                    for (const comp of row.components) {
+                        if (comp.customId === i.customId) {
+                            const disabledButton = ButtonBuilder.from(comp).setDisabled(true);
+                            const index = row.components.indexOf(comp);
+                            row.components[index] = disabledButton;
+                            updated = true;
+                            break;
+                        }
+                    }
+                    if (updated) break;
+                }
+
+                if (updated) {
+                    await i.update({ components: rows });
+                }
+
+                const pendingMsg = await i.channel.send({
+                    content: `⏳ **Ожидание подтверждения оплаты**\n` +
+                             `👤 Участник: **${participantName}**\n` +
+                             `💰 Сумма: **${amount.toLocaleString()} $**\n` +
+                             `🔄 Оплата от <@${i.user.id}>\n\n` +
+                             `Проверяющий, проверьте скриншот и ответьте на это сообщение командой \`!подтвердить\``
+                });
+
+                global.pendingMessages.set(pendingMsg.id, pendingMsg.id);
+                global.pendingPayments.set(pendingMsg.id, {
+                    participantName: participantName,
+                    amount: amount,
+                    buttonMessageId: i.message.id
+                });
+
+                logAction('PAY_BUTTON', i.user, `${participantName} | ${amount.toLocaleString()}$`);
+                return i.followUp({ 
+                    content: `✅ Кнопка для **${participantName}** нажата. Ожидайте подтверждения проверяющего.`, 
+                    flags: [MessageFlags.Ephemeral] 
+                });
             }
 
             if (i.customId === 'start') {
@@ -817,25 +880,6 @@ client.on('interactionCreate', async i => {
                 const membersInfo = getMembersInfo(participantNames);
                 const executorMentions = membersInfo.mentions.join(' ');
 
-                const payEmbed = new EmbedBuilder()
-                    .setTitle(oldEmbed.title)
-                    .setColor(0x00FF00)
-                    .setDescription(
-                        `**Исполнитель:** ${executorMentions}\n\n` +
-                        `${executorMentions} внесите сумму в казну и обязательно приложите скриншот!\n` +
-                        `**Проверяющий:** ответьте \`!подтвердить\`\n` +
-                        `**Оплатить нужно в течении 72 часов, иначе будут налагаться просрочки про просрочки читайте в** <#1374377052509179994>`
-                    );
-
-                let totalPayAmount = 0;
-                participants.forEach(f => {
-                    const toPay = Math.round((parseInt(f.value.replace(/\D/g, '')) || 0) * 1000 * multiplier);
-                    totalPayAmount += toPay;
-                    db.prepare('INSERT OR REPLACE INTO debtors (name, amount) VALUES (?, IFNULL((SELECT amount FROM debtors WHERE name = ?), 0) + ?)')
-                        .run(f.name, f.name, toPay);
-                    payEmbed.addFields({ name: f.name, value: `${toPay.toLocaleString()} $` });
-                });
-
                 await i.message.edit({
                     content: '✅ Статус: **УСПЕХ ✅**',
                     components: [],
@@ -843,32 +887,80 @@ client.on('interactionCreate', async i => {
                 }).catch(() => {});
 
                 const payChannel = await client.channels.fetch(CONFIG.PAY);
-                if (payChannel) {
-                    const rolePings = CONFIG.ALLOWED_ROLES.map(r => `<@&${r}>`).join(' ');
-                    let pingContent = rolePings + ` | <@${creatorId}>`;
-                    if (executorMentions) pingContent += ` | Исполнители: ${executorMentions}`;
+                if (!payChannel) return i.reply({ content: '❌ Канал оплаты не найден.', flags: [MessageFlags.Ephemeral] });
 
-                    const payMsg = await payChannel.send({
-                        content: pingContent,
-                        embeds: [payEmbed],
-                        components: [new ActionRowBuilder().addComponents(
-                            new ButtonBuilder().setCustomId('pay_confirm').setLabel('Оплатить').setStyle(ButtonStyle.Success)
-                        )]
-                    });
-                    db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-                        .run(msgId, payMsg.id, creatorId, oldEmbed.title, totalPayAmount, Date.now(), Date.now() + 72 * 60 * 60 * 1000);
-                    logAction('CONTRACT_CLOSE_BUTTON', i.user, `${oldEmbed.title} | Сумма: ${totalPayAmount.toLocaleString()}$`);
+                const paymentData = [];
+                for (const participant of participants) {
+                    const name = participant.name;
+                    const billValue = parseInt(participant.value.replace(/\D/g, '')) || 0;
+                    const toPay = Math.round(billValue * 1000 * multiplier);
+                    if (toPay <= 0) continue;
+                    
+                    paymentData.push({ name, amount: toPay });
+                    db.prepare('INSERT OR REPLACE INTO debtors (name, amount) VALUES (?, IFNULL((SELECT amount FROM debtors WHERE name = ?), 0) + ?)')
+                        .run(name, name, toPay);
                 }
-                return i.reply({ content: '✅ Контракт закрыт, платёж создан.', flags: [MessageFlags.Ephemeral] });
+
+                if (paymentData.length === 0) return i.reply({ content: '❌ Нет участников для оплаты.', flags: [MessageFlags.Ephemeral] });
+
+                let description = `**Исполнители:** ${executorMentions}\n\n`;
+                description += `Каждый участник должен оплатить свою долю в течение 72 часов.\n`;
+                description += `Проверяющий: после оплаты участника нажмите кнопку и ответьте \`!подтвердить\`\n\n`;
+                description += `**Долги участников:**\n`;
+                
+                const buttons = [];
+                for (const p of paymentData) {
+                    const memberInfo = getMembersInfo([p.name]);
+                    const memberMention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : p.name;
+                    description += `• ${memberMention}: **${p.amount.toLocaleString()} $**\n`;
+                    
+                    const customId = `pay_${p.name.replace(/\s/g, '_')}_${msgId}`;
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setCustomId(customId)
+                            .setLabel(`Оплатить ${p.name}`)
+                            .setStyle(ButtonStyle.Success)
+                    );
+                }
+
+                const payEmbed = new EmbedBuilder()
+                    .setTitle(oldEmbed.title)
+                    .setColor(0x00FF00)
+                    .setDescription(description);
+
+                const rows = [];
+                for (let i = 0; i < buttons.length; i += 5) {
+                    rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+                }
+
+                const totalAmount = paymentData.reduce((sum, p) => sum + p.amount, 0);
+                const payMsg = await payChannel.send({
+                    content: CONFIG.ALLOWED_ROLES.map(r => `<@&${r}>`).join(' ') + ` | ${executorMentions}`,
+                    embeds: [payEmbed],
+                    components: rows
+                });
+
+                db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+                    .run(msgId, payMsg.id, creatorId, oldEmbed.title, totalAmount, Date.now(), Date.now() + 72 * 60 * 60 * 1000);
+
+                logAction('CONTRACT_CLOSE_BUTTON', i.user, `${oldEmbed.title} | ${paymentData.length} участников | ${totalAmount.toLocaleString()}$`);
+                return i.reply({ content: `✅ Контракт закрыт, созданы кнопки для ${paymentData.length} участников.`, flags: [MessageFlags.Ephemeral] });
             }
 
             if (i.customId === 'pay_confirm') {
                 const messages = await i.channel.messages.fetch({ limit: 10 });
-                if (!messages.some(m => m.attachments.size > 0)) return i.reply({ content: '❌ Прикрепите скриншот!', flags: [MessageFlags.Ephemeral] });
-                const pendingMsg = await i.channel.send({ content: `⏳ Ожидание подтверждения...\nОплата от <@${i.user.id}>. Ответьте \`!подтвердить\`` });
+                if (!messages.some(m => m.attachments.size > 0)) {
+                    return i.reply({ content: '❌ Прикрепите скриншот!', flags: [MessageFlags.Ephemeral] });
+                }
+                const pendingMsg = await i.channel.send({ 
+                    content: `⏳ Ожидание подтверждения...\nОплата от <@${i.user.id}>. Ответьте \`!подтвердить\`` 
+                });
                 global.pendingMessages.set(i.message.id, pendingMsg.id);
                 logAction('PAY_CONFIRM', i.user, `Ожидание подтверждения ${i.message.id}`);
-                return i.update({ content: `⏳ Ожидание подтверждения...\nОплата от <@${i.user.id}>. Ответьте \`!подтвердить\``, components: [] });
+                return i.update({ 
+                    content: `⏳ Ожидание подтверждения...\nОплата от <@${i.user.id}>. Ответьте \`!подтвердить\``, 
+                    components: [] 
+                });
             }
 
             if (i.customId === 'start_admin') {
@@ -988,6 +1080,7 @@ client.on('interactionCreate', async i => {
 
     } catch (err) {
         console.error('Ошибка взаимодействия:', err);
+        logAction('ERROR', { tag: 'SYSTEM' }, err.message);
     }
 });
 
