@@ -162,9 +162,35 @@ function payFromWallet(playerName, contractTitle, amount, markedBy) {
     db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(amount);
     return db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(playerName);
 }
+// Логирование действий
+function logAction(type, user, data) {
+    const timestamp = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+    const userName = user?.tag || user?.username || user?.id || 'SYSTEM';
+    console.log(`[${timestamp}] 📌 ${type} | ${userName} | ${data}`);
+}
 
+function logCommand(i, details = '') {
+    const timestamp = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+    console.log(`[${timestamp}] 📋 КОМАНДА | ${i.user.tag} (${i.user.id}) | /${i.commandName} ${details}`);
+}
+
+function logButton(i, details = '') {
+    const timestamp = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+    console.log(`[${timestamp}] 🔘 КНОПКА | ${i.user.tag} (${i.user.id}) | ${i.customId} ${details}`);
+}
+
+function logModal(i, details = '') {
+    const timestamp = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+    console.log(`[${timestamp}] 📝 МОДАЛКА | ${i.user.tag} (${i.user.id}) | ${i.customId} ${details}`);
+}
+
+function logMessage(msg, details = '') {
+    const timestamp = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+    console.log(`[${timestamp}] 💬 СООБЩЕНИЕ | ${msg.author.tag} (${msg.author.id}) | ${msg.content} ${details}`);
+}
 module.exports = {
     getMembersInfo, deductDebt, deductOverdue, deductCritical,
     addManualPayment, formatOverdue, setupTimer, getPendingDetails,
-    addToWallet, getWallet, payFromWallet
+    addToWallet, getWallet, payFromWallet,
+    logAction, logCommand, logButton, logModal, logMessage
 };
