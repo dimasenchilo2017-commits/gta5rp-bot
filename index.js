@@ -146,7 +146,7 @@ client.on('messageCreate', async msg => {
         return;
     }
 
-    // !подтвердить - ОБНОВЛЁННЫЙ
+    // !подтвердить - ОБНОВЛЁННЫЙ С ПОИСКОМ ПО УПОМИНАНИЮ
     if (msg.channel.id === CONFIG.PAY && msg.content.trim() === '!подтвердить') {
         logMessage(msg);
         const hasRole = msg.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
@@ -183,6 +183,12 @@ client.on('messageCreate', async msg => {
                 setTimeout(async () => { await msg.delete().catch(() => {}); await reply.delete().catch(() => {}); }, 3000);
                 return;
             }
+
+            // [!] ПОЛУЧАЕМ УПОМИНАНИЕ ДЛЯ ПОИСКА В ЭМБЕДЕ
+            const memberInfo2 = getMembersInfo([participantName]);
+            const mention2 = memberInfo2.mentions.length > 0 ? memberInfo2.mentions[0] : null;
+            const searchPatterns2 = [participantName];
+            if (mention2) searchPatterns2.push(mention2);
 
             logAction('PAYMENT', msg.author, `${participantName} | ${amount.toLocaleString()}$`);
 
@@ -222,7 +228,8 @@ client.on('messageCreate', async msg => {
                                     continue;
                                 }
                                 if (inDebtSection && (line.trim().startsWith('•') || line.trim().startsWith('-'))) {
-                                    if (line.includes(participantName)) {
+                                    const matches = searchPatterns2.some(pattern => line.includes(pattern));
+                                    if (matches) {
                                         const cleanLine = line.replace(/^[•-\s]+/, '').trim();
                                         newLines.push(`   • ~~${cleanLine}~~ ✅`);
                                     } else {
@@ -1112,11 +1119,17 @@ client.on('interactionCreate', async i => {
                 const payment = db.prepare('SELECT * FROM pending_payments WHERE paymentMsgId = ? AND paid = 0').get(i.customId);
                 
                 if (!payment) {
-                    return i.editReply({ content: '❌ Платёж не найден или уже оплачен.' });  // ✅ editReply
+                    return i.editReply({ content: '❌ Платёж не найден или уже оплачен.' });
                 }
                 
                 const participantName = payment.title.split(' - ')[1] || 'Неизвестный участник';
                 const amount = payment.totalAmount;
+
+                // [!] ПОЛУЧАЕМ УПОМИНАНИЕ ДЛЯ ПОИСКА В ЭМБЕДЕ
+                const memberInfo = getMembersInfo([participantName]);
+                const mention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : null;
+                const searchPatterns = [participantName];
+                if (mention) searchPatterns.push(mention);
 
                 // [!] ПРОВЕРЯЕМ КОШЕЛЁК
                 const wallet = db.prepare('SELECT balance FROM wallets WHERE playerName = ?').get(participantName);
@@ -1149,7 +1162,7 @@ client.on('interactionCreate', async i => {
                     const messages = await i.channel.messages.fetch({ limit: 20 });
                     const userMessage = messages.find(m => m.author.id === i.user.id && m.attachments.size > 0);
                     if (!userMessage) {
-                        return i.editReply({   // ✅ editReply
+                        return i.editReply({
                             content: `❌ На кошельке **${participantName}** недостаточно средств!\n` +
                                     `💰 В кошельке: ${walletAmount.toLocaleString()} $\n` +
                                     `💳 Нужно оплатить: ${amount.toLocaleString()} $\n` +
@@ -1166,7 +1179,7 @@ client.on('interactionCreate', async i => {
                     for (const comp of row.components) {
                         if (comp.customId === i.customId) {
                             if (comp.disabled) {
-                                return i.editReply({ content: '⚠️ Эта кнопка уже была нажата.' });  // ✅ editReply
+                                return i.editReply({ content: '⚠️ Эта кнопка уже была нажата.' });
                             }
                             const disabledButton = ButtonBuilder.from(comp).setDisabled(true);
                             const index = row.components.indexOf(comp);
@@ -1179,7 +1192,7 @@ client.on('interactionCreate', async i => {
                 }
                 
                 if (!updated) {
-                    return i.editReply({ content: '❌ Не удалось найти кнопку.' });  // ✅ editReply
+                    return i.editReply({ content: '❌ Не удалось найти кнопку.' });
                 }
 
                 // [!] СРАЗУ ЗАЧЁРКИВАЕМ В ЭМБЕДЕ (до подтверждения!)
@@ -1196,9 +1209,14 @@ client.on('interactionCreate', async i => {
                                 newLines.push(line);
                                 continue;
                             }
-                            if (inDebtSection && line.includes(participantName)) {
-                                const cleanLine = line.replace(/^[•-\s]+/, '').trim();
-                                newLines.push(`   • ~~${cleanLine}~~ ⏳ (ожидает подтверждения)`);
+                            if (inDebtSection) {
+                                const matches = searchPatterns.some(pattern => line.includes(pattern));
+                                if (matches) {
+                                    const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                                    newLines.push(`   • ~~${cleanLine}~~ ⏳ (ожидает подтверждения)`);
+                                } else {
+                                    newLines.push(line);
+                                }
                             } else {
                                 newLines.push(line);
                             }
@@ -1240,22 +1258,30 @@ client.on('interactionCreate', async i => {
                                     newLines.push(line);
                                     continue;
                                 }
-                                if (inDebtSection && line.includes(participantName) && line.includes('⏳ (ожидает подтверждения)')) {
-                                    const cleanLine = line.replace(/^[•-\s]+/, '').trim();
-                                    const amountMatch = cleanLine.match(/\*\*([\d, ]+)\s*\$?/);
-                                    const amountStr = amountMatch ? amountMatch[1] : amount.toLocaleString();
-                                    newLines.push(`   • ~~${participantName}~~ ✅ **${amountStr} $**`);
-                                    found = true;
+                                if (inDebtSection) {
+                                    const matches = searchPatterns.some(pattern => line.includes(pattern));
+                                    if (matches && line.includes('⏳ (ожидает подтверждения)')) {
+                                        const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                                        const amountMatch = cleanLine.match(/\*\*([\d, ]+)\s*\$?/);
+                                        const amountStr = amountMatch ? amountMatch[1] : amount.toLocaleString();
+                                        newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                        found = true;
+                                    } else {
+                                        newLines.push(line);
+                                    }
                                 } else {
                                     newLines.push(line);
                                 }
                             }
                             if (!found) {
                                 for (const line of lines) {
-                                    if (inDebtSection && line.includes(participantName)) {
-                                        const cleanLine = line.replace(/^[•-\s]+/, '').trim();
-                                        newLines.push(`   • ~~${cleanLine}~~ ✅`);
-                                        break;
+                                    if (inDebtSection) {
+                                        const matches = searchPatterns.some(pattern => line.includes(pattern));
+                                        if (matches) {
+                                            const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                                            newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -1268,7 +1294,7 @@ client.on('interactionCreate', async i => {
                     }
                     
                     logAction('WALLET_PAY_CONFIRM', i.user, `${participantName} | ${amount.toLocaleString()}$ (авто из кошелька)`);
-                    return i.followUp({   // ✅ followUp (правильно!)
+                    return i.followUp({
                         content: `✅ Оплата **${participantName}** автоматически списана с кошелька!\n` +
                                 `💰 Сумма: ${amount.toLocaleString()} $\n` +
                                 `📌 Остаток на кошельке: ${newBalance.toLocaleString()} $`,
@@ -1300,7 +1326,7 @@ client.on('interactionCreate', async i => {
                     contractTitle: payment.title.split(' - ')[0] || 'Неизвестный контракт'
                 });
                 logAction('PAY_BUTTON', i.user, `${participantName} | ${amount.toLocaleString()}$ (${paidFromWallet > 0 ? paidFromWallet.toLocaleString() + '$ из кошелька' : 'наличными'})`);
-                return i.followUp({   // ✅ followUp (правильно!)
+                return i.followUp({
                     content: `✅ Кнопка для **${participantName}** нажата.\n` +
                             (paidFromWallet > 0 ? `💳 С кошелька списано: ${paidFromWallet.toLocaleString()} $\n` : '') +
                             `📌 Ожидайте подтверждения проверяющего.`,
