@@ -176,7 +176,7 @@ client.on('messageCreate', async msg => {
                 return;
             }
 
-            const { participantName, amount, buttonMessageId } = paymentData;
+            const { participantName, amount, buttonMessageId, buttonCustomId } = paymentData;
             
             if (amount <= 0) {
                 const reply = await msg.reply('❌ Сумма не найдена.');
@@ -188,7 +188,7 @@ client.on('messageCreate', async msg => {
 
             deductDebt(participantName, amount);
             db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(amount);
-            db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(buttonMessageId);
+            db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(buttonCustomId);
 
             try {
                 const buttonMsg = await msg.channel.messages.fetch(buttonMessageId);
@@ -197,7 +197,7 @@ client.on('messageCreate', async msg => {
                     let updated = false;
                     for (const row of rows) {
                         for (const comp of row.components) {
-                            if (comp.customId && comp.customId.includes(participantName.replace(/\s/g, '_'))) {
+                            if (comp.customId === buttonCustomId) {
                                 const disabledButton = ButtonBuilder.from(comp).setDisabled(true);
                                 const index = row.components.indexOf(comp);
                                 row.components[index] = disabledButton;
@@ -1035,7 +1035,8 @@ client.on('interactionCreate', async i => {
                 global.pendingPayments.set(pendingMsg.id, {
                     participantName: participantName,
                     amount: remainingAmount,
-                    buttonMessageId: i.customId,  // ✅ ПРАВИЛЬНО!
+                    buttonMessageId: i.message.id,   // ✅ ID сообщения с кнопками!
+                    buttonCustomId: i.customId,      // ✅ ID кнопки для отключения!
                     paidFromWallet: paidFromWallet,
                     totalAmount: amount,
                     contractTitle: payment.title.split(' - ')[0] || 'Неизвестный контракт'
