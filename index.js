@@ -524,34 +524,155 @@ client.on('interactionCreate', async i => {
             if (i.commandName === 'Импортировать оплату') {
                 await i.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const targetMsg = i.targetMessage;
-                if (!targetMsg.embeds?.[0]?.description) return i.editReply('❌ Не сообщение с платежом.');
+                
+                if (!targetMsg.embeds?.[0]?.description) {
+                    return i.editReply('❌ Не сообщение с платежом.');
+                }
 
                 const embed = targetMsg.embeds[0];
                 const contractTitle = embed?.title || 'Неизвестный контракт';
                 const description = embed.description || '';
                 
+                // [!] НАХОДИМ СОЗДАТЕЛЯ
                 let creatorId = targetMsg.content.match(/<@!?(\d+)>/)?.[1] || 
                                 db.prepare('SELECT creatorId FROM active_contracts WHERE msgId = ?').get(targetMsg.id)?.creatorId;
-                if (!creatorId) return i.editReply('❌ Не найден создатель.');
+                if (!creatorId) {
+                    return i.editReply('❌ Не найден создатель контракта.');
+                }
                 
-                if (db.prepare('SELECT 1 FROM pending_payments WHERE paymentMsgId = ?').get(targetMsg.id)) {
-                    return i.editReply('⚠️ Уже в БД.');
+                // [!] ПРОВЕРЯЕМ, НЕТ ЛИ УЖЕ В БД
+                if (db.prepare('SELECT 1 FROM pending_payments WHERE contractMsgId = ?').get(targetMsg.id)) {
+                    return i.editReply('⚠️ Этот контракт уже импортирован в БД.');
                 }
 
+                // [!] ИЗВЛЕКАЕМ УЧАСТНИКОВ И ИХ ДОЛГИ
                 const lines = description.split('\n');
+                const participants = [];
+                let inDebtSection = false;
                 let totalAmount = 0;
+                
                 for (const line of lines) {
-                    const match = line.match(/\*\*([\d, ]+)\s*\$?/);
-                    if (match) {
-                        totalAmount += parseInt(match[1].replace(/\s/g, ''));
+                    // Ищем секцию с долгами
+                    if (line.includes('**Долги участников:**') || line.includes('Долги участников:')) {
+                        inDebtSection = true;
+                        continue;
+                    }
+                    
+                    if (inDebtSection && (line.trim().startsWith('•') || line.trim().startsWith('-'))) {
+                        // Парсим строку типа: "• Artem: **25 000 $**" или "• <@123>: **25 000 $**"
+                        const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                        
+                        // Извлекаем имя (до двоеточия)
+                        const nameMatch = cleanLine.match(/^([^:]+):/);
+                        if (!nameMatch) continue;
+                        
+                        const rawName = nameMatch[1].trim();
+                        // Убираем упоминания из имени
+                        const name = rawName.replace(/<@!?\d+>/g, '').trim();
+                        
+                        // Извлекаем сумму (в ** или просто число)
+                        let amount = 0;
+                        const amountMatch = cleanLine.match(/\*\*([\d, ]+)\s*\$?/);
+                        if (amountMatch) {
+                            amount = parseInt(amountMatch[1].replace(/\s/g, ''));
+                        } else {
+                            // Если без **, ищем просто число с $
+                            const simpleMatch = cleanLine.match(/([\d, ]+)\s*\$?/);
+                            if (simpleMatch) {
+                                amount = parseInt(simpleMatch[1].replace(/\s/g, ''));
+                            }
+                        }
+                        
+                        if (amount > 0 && name) {
+                            participants.push({ name, amount });
+                            totalAmount += amount;
+                        }
                     }
                 }
 
-                db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-                    .run(targetMsg.id, targetMsg.id, creatorId, contractTitle, totalAmount, Date.now(), Date.now() + 72 * 60 * 60 * 1000);
+                if (participants.length === 0) {
+                    return i.editReply('❌ Не найдены участники для оплаты.');
+                }
+
+                // [!] СОХРАНЯЕМ В БД и СОЗДАЁМ КНОПКИ
+                const payChannel = await client.channels.fetch(CONFIG.PAY);
+                if (!payChannel) {
+                    return i.editReply('❌ Канал оплаты не найден.');
+                }
+
+                // Добавляем должников
+                for (const p of participants) {
+                    db.prepare('INSERT OR REPLACE INTO debtors (name, amount) VALUES (?, IFNULL((SELECT amount FROM debtors WHERE name = ?), 0) + ?)')
+                        .run(p.name, p.name, p.amount);
+                }
+
+                // Формируем эмбед для оплаты
+                let description2 = `**Исполнители:** ${targetMsg.content.match(/<@!?(\d+)>/g)?.join(' ') || 'Неизвестно'}\n\n`;
+                description2 += `Каждый участник должен оплатить свою долю в течение 72 часов.\n`;
+                description2 += `Проверяющий: после оплаты участника нажмите кнопку и ответьте \`!подтвердить\`\n\n`;
+                description2 += `**Долги участников:**\n`;
                 
-                logAction('IMPORT_PAY', i.user, `${contractTitle} | ${totalAmount.toLocaleString()}$`);
-                return i.editReply(`✅ Оплата "${contractTitle}" добавлена. Сумма: ${totalAmount.toLocaleString()} $`);
+                const buttons = [];
+                const paymentData = [];
+                
+                for (const p of participants) {
+                    // Находим discord ID для упоминания
+                    const memberInfo = getMembersInfo([p.name]);
+                    const memberMention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : p.name;
+                    description2 += `• ${memberMention}: **${p.amount.toLocaleString()} $**\n`;
+                    
+                    const uniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+                    const customId = `pay_${uniqueId}`;
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setCustomId(customId)
+                            .setLabel(`Оплатить ${p.name}`)
+                            .setStyle(ButtonStyle.Success)
+                    );
+                    
+                    paymentData.push({
+                        name: p.name,
+                        amount: p.amount,
+                        customId: customId
+                    });
+                }
+
+                const payEmbed = new EmbedBuilder()
+                    .setTitle(contractTitle)
+                    .setColor(0x00FF00)
+                    .setDescription(description2);
+
+                const rows = [];
+                for (let i = 0; i < buttons.length; i += 5) {
+                    rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+                }
+
+                const payMsg = await payChannel.send({
+                    content: CONFIG.ALLOWED_ROLES.map(r => `<@&${r}>`).join(' ') + ` | ${targetMsg.content.match(/<@!?(\d+)>/g)?.join(' ') || ''}`,
+                    embeds: [payEmbed],
+                    components: rows
+                });
+
+                // Сохраняем в pending_payments
+                for (const p of paymentData) {
+                    db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+                        .run(
+                            targetMsg.id, 
+                            p.customId,
+                            creatorId, 
+                            `${contractTitle} - ${p.name}`, 
+                            p.amount, 
+                            Date.now(), 
+                            Date.now() + 72 * 60 * 60 * 1000
+                        );
+                }
+
+                logAction('IMPORT_PAY', i.user, `${contractTitle} | ${participants.length} участников | ${totalAmount.toLocaleString()}$`);
+                
+                return i.editReply(`✅ Оплата "${contractTitle}" импортирована!\n` +
+                                `👥 Участников: ${participants.length}\n` +
+                                `💰 Общая сумма: ${totalAmount.toLocaleString()} $\n` +
+                                `📌 Кнопки созданы в <#${payChannel.id}>`);
             }
         }
 
@@ -1023,14 +1144,15 @@ client.on('interactionCreate', async i => {
 
                 // [!] Если не хватает — запрашиваем скриншот
                 if (needManualPayment && remainingAmount > 0) {
-                    const messages = await i.channel.messages.fetch({ limit: 10 });
-                    if (!messages.some(m => m.attachments.size > 0)) {
+                    const messages = await i.channel.messages.fetch({ limit: 20 });
+                    const userMessage = messages.find(m => m.author.id === i.user.id && m.attachments.size > 0);
+                    if (!userMessage) {
                         return i.reply({ 
                             content: `❌ На кошельке **${participantName}** недостаточно средств!\n` +
-                                     `💰 В кошельке: ${walletAmount.toLocaleString()} $\n` +
-                                     `💳 Нужно оплатить: ${amount.toLocaleString()} $\n` +
-                                     `📌 Остаток к оплате: ${remainingAmount.toLocaleString()} $\n\n` +
-                                     `Прикрепите скриншот оплаты на ${remainingAmount.toLocaleString()} $ и нажмите кнопку снова.`, 
+                                    `💰 В кошельке: ${walletAmount.toLocaleString()} $\n` +
+                                    `💳 Нужно оплатить: ${amount.toLocaleString()} $\n` +
+                                    `📌 Остаток к оплате: ${remainingAmount.toLocaleString()} $\n\n` +
+                                    `Прикрепите скриншот оплаты на ${remainingAmount.toLocaleString()} $ и нажмите кнопку снова.`, 
                             flags: [MessageFlags.Ephemeral] 
                         });
                     }
@@ -1056,21 +1178,29 @@ client.on('interactionCreate', async i => {
                     const embed = i.message.embeds[0];
                     if (embed) {
                         const desc = embed.description || '';
-                        const newDesc = desc.replace(
-                            new RegExp(`[•-]\\s*<@!?\\d+>?\\s*${participantName}[^\\n]*\\n`, 'g'),
-                            `• ~~${participantName}~~ ⏳ **${amount.toLocaleString()} $** (ожидает подтверждения)\n`
-                        );
+                        const lines = desc.split('\n');
+                        let newLines = [];
+                        let inDebtSection = false;
+                        for (const line of lines) {
+                            if (line.includes('**Долги участников:**') || line.includes('Долги участников:')) {
+                                inDebtSection = true;
+                                newLines.push(line);
+                                continue;
+                            }
+                            if (inDebtSection && line.includes(participantName)) {
+                                const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                                newLines.push(`   • ~~${cleanLine}~~ ⏳ (ожидает подтверждения)`);
+                            } else {
+                                newLines.push(line);
+                            }
+                        }
+                        const newDesc = newLines.join('\n');
                         const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
                         await i.message.edit({ embeds: [newEmbed] });
                     }
                 } catch (err) {
                     console.warn('Не удалось обновить эмбед при нажатии:', err);
                 }
-
-                if (updated) {
-                    await i.update({ components: rows });
-                }
-
                 // [!] Полностью из кошелька — сразу подтверждаем
                 if (!needManualPayment) {
                     // [!] ПОЛУЧАЕМ НОВЫЙ БАЛАНС
