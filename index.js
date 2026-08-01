@@ -212,10 +212,27 @@ client.on('messageCreate', async msg => {
                         const embed = buttonMsg.embeds[0];
                         if (embed) {
                             const desc = embed.description || '';
-                            const newDesc = desc.replace(
-                                new RegExp(`• <@!?\\d+>?\\s*\\*\\*${participantName}.*?\\n`, 'g'),
-                                `• ~~${participantName}~~ ✅ **${amount.toLocaleString()} $**\n`
-                            );
+                            const lines = desc.split('\n');
+                            let newLines = [];
+                            let inDebtSection = false;
+                            for (const line of lines) {
+                                if (line.includes('**Долги участников:**') || line.includes('Долги участников:')) {
+                                    inDebtSection = true;
+                                    newLines.push(line);
+                                    continue;
+                                }
+                                if (inDebtSection && (line.trim().startsWith('•') || line.trim().startsWith('-'))) {
+                                    if (line.includes(participantName)) {
+                                        const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                                        newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                    } else {
+                                        newLines.push(line);
+                                    }
+                                } else {
+                                    newLines.push(line);
+                                }
+                            }
+                            const newDesc = newLines.join('\n');
                             const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
                             await buttonMsg.edit({ embeds: [newEmbed], components: rows });
                         } else {
@@ -242,7 +259,7 @@ client.on('messageCreate', async msg => {
                             }
                             if (!allDisabled) break;
                         }
-                        
+                     
                         if (allDisabled) {
                             const embed = freshMsg.embeds[0];
                             if (embed) {
@@ -251,14 +268,15 @@ client.on('messageCreate', async msg => {
                                 let newLines = [];
                                 let inDebtSection = false;
                                 for (const line of lines) {
-                                    if (line.includes('**Долги участников:**')) {
+                                    if (line.includes('**Долги участников:**') || line.includes('Долги участников:')) {
                                         inDebtSection = true;
                                         newLines.push(line);
                                         continue;
                                     }
-                                    if (inDebtSection && line.trim().startsWith('•')) {
+                                    if (inDebtSection && (line.trim().startsWith('•') || line.trim().startsWith('-'))) {
                                         if (!line.includes('~~')) {
-                                            newLines.push(`   • ~~${line.replace('•', '').trim()}~~ ✅`);
+                                            const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                                            newLines.push(`   • ~~${cleanLine}~~ ✅`);
                                         } else {
                                             newLines.push(line);
                                         }
@@ -270,10 +288,9 @@ client.on('messageCreate', async msg => {
                                 const newDesc = newLines.join('\n');
                                 const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
                                 
-                                // [!] УДАЛЯЕМ ВСЕ КНОПКИ
                                 await freshMsg.edit({ 
                                     embeds: [newEmbed], 
-                                    components: []  // <-- ПУСТОЙ МАССИВ = НЕТ КНОПОК
+                                    components: [] 
                                 });
                                 
                                 db.prepare(`INSERT INTO paid_markers (debtorName, contractTitle, amount, markedBy, createdAt) VALUES (?, ?, ?, ?, ?)`)
