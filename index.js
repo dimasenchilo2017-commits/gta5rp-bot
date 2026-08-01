@@ -230,8 +230,19 @@ client.on('messageCreate', async msg => {
                                 if (inDebtSection && (line.trim().startsWith('•') || line.trim().startsWith('-'))) {
                                     const matches = searchPatterns2.some(pattern => line.includes(pattern));
                                     if (matches) {
-                                        const cleanLine = line.replace(/^[•-\s]+/, '').trim();
-                                        newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                        const cleanLine = line
+                                            .replace(/^[•-\s]+/, '')
+                                            .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                            .trim();
+                                        if (!cleanLine) {
+                                            const nameMatch = line.match(/\*\*([^*]+)\*\*/);
+                                            const amountMatch = line.match(/\*\*([\d, ]+)\s*\$?/);
+                                            const name = nameMatch ? nameMatch[1].trim() : participantName;
+                                            const amountStr = amountMatch ? amountMatch[1] : amount.toLocaleString();
+                                            newLines.push(`   • ~~${name}: ${amountStr} $~~ ✅`);
+                                        } else {
+                                            newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                        }
                                     } else {
                                         newLines.push(line);
                                     }
@@ -282,7 +293,10 @@ client.on('messageCreate', async msg => {
                                     }
                                     if (inDebtSection && (line.trim().startsWith('•') || line.trim().startsWith('-'))) {
                                         if (!line.includes('~~')) {
-                                            const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                                            const cleanLine = line
+                                                .replace(/^[•-\s]+/, '')
+                                                .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                                .trim();
                                             newLines.push(`   • ~~${cleanLine}~~ ✅`);
                                         } else {
                                             newLines.push(line);
@@ -1212,7 +1226,9 @@ client.on('interactionCreate', async i => {
                             if (inDebtSection) {
                                 const matches = searchPatterns.some(pattern => line.includes(pattern));
                                 if (matches) {
-                                    const cleanLine = line.replace(/^[•-\s]+/, '').trim();
+                                    const cleanLine = line
+                                        .replace(/^[•-\s]+/, '')
+                                        .trim();
                                     newLines.push(`   • ~~${cleanLine}~~ ⏳ (ожидает подтверждения)`);
                                 } else {
                                     newLines.push(line);
@@ -1261,10 +1277,19 @@ client.on('interactionCreate', async i => {
                                 if (inDebtSection) {
                                     const matches = searchPatterns.some(pattern => line.includes(pattern));
                                     if (matches && line.includes('⏳ (ожидает подтверждения)')) {
-                                        const cleanLine = line.replace(/^[•-\s]+/, '').trim();
-                                        const amountMatch = cleanLine.match(/\*\*([\d, ]+)\s*\$?/);
-                                        const amountStr = amountMatch ? amountMatch[1] : amount.toLocaleString();
-                                        newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                        const cleanLine = line
+                                            .replace(/^[•-\s]+/, '')
+                                            .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                            .trim();
+                                        if (!cleanLine) {
+                                            const nameMatch = line.match(/\*\*([^*]+)\*\*/);
+                                            const amountMatch = line.match(/\*\*([\d, ]+)\s*\$?/);
+                                            const name = nameMatch ? nameMatch[1].trim() : participantName;
+                                            const amountStr = amountMatch ? amountMatch[1] : amount.toLocaleString();
+                                            newLines.push(`   • ~~${name}: ${amountStr} $~~ ✅`);
+                                        } else {
+                                            newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                        }
                                         found = true;
                                     } else {
                                         newLines.push(line);
@@ -1278,8 +1303,19 @@ client.on('interactionCreate', async i => {
                                     if (inDebtSection) {
                                         const matches = searchPatterns.some(pattern => line.includes(pattern));
                                         if (matches) {
-                                            const cleanLine = line.replace(/^[•-\s]+/, '').trim();
-                                            newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                            const cleanLine = line
+                                                .replace(/^[•-\s]+/, '')
+                                                .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                                .trim();
+                                            if (!cleanLine) {
+                                                const nameMatch = line.match(/\*\*([^*]+)\*\*/);
+                                                const amountMatch = line.match(/\*\*([\d, ]+)\s*\$?/);
+                                                const name = nameMatch ? nameMatch[1].trim() : participantName;
+                                                const amountStr = amountMatch ? amountMatch[1] : amount.toLocaleString();
+                                                newLines.push(`   • ~~${name}: ${amountStr} $~~ ✅`);
+                                            } else {
+                                                newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                            }
                                             break;
                                         }
                                     }
@@ -1291,6 +1327,66 @@ client.on('interactionCreate', async i => {
                         }
                     } catch (err) {
                         console.warn('Не удалось обновить эмбед:', err);
+                    }
+
+                    // [!] ПРОВЕРЯЕМ, ВСЕ ЛИ ОПЛАТИЛИ (АВТО-ОПЛАТА)
+                    try {
+                        const freshMsg = await i.channel.messages.fetch(i.message.id);
+                        if (freshMsg && freshMsg.components) {
+                            let allDisabled = true;
+                            for (const row of freshMsg.components) {
+                                for (const comp of row.components) {
+                                    if (comp.customId && comp.customId.startsWith('pay_') && !comp.disabled) {
+                                        allDisabled = false;
+                                        break;
+                                    }
+                                }
+                                if (!allDisabled) break;
+                            }
+                         
+                            if (allDisabled) {
+                                const embed = freshMsg.embeds[0];
+                                if (embed) {
+                                    const desc = embed.description || '';
+                                    const lines = desc.split('\n');
+                                    let newLines = [];
+                                    let inDebtSection = false;
+                                    for (const line of lines) {
+                                        if (line.includes('**Долги участников:**') || line.includes('Долги участников:')) {
+                                            inDebtSection = true;
+                                            newLines.push(line);
+                                            continue;
+                                        }
+                                        if (inDebtSection && (line.trim().startsWith('•') || line.trim().startsWith('-'))) {
+                                            if (!line.includes('~~')) {
+                                                const cleanLine = line
+                                                    .replace(/^[•-\s]+/, '')
+                                                    .replace(/⏳\s*\(ожидает подтверждения\)/g, '')
+                                                    .trim();
+                                                newLines.push(`   • ~~${cleanLine}~~ ✅`);
+                                            } else {
+                                                newLines.push(line);
+                                            }
+                                        } else {
+                                            newLines.push(line);
+                                        }
+                                    }
+                                    newLines.push('\n✅ **ВСЕ ОПЛАЧЕНО!** 🎉');
+                                    const newDesc = newLines.join('\n');
+                                    const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
+                                    
+                                    await freshMsg.edit({ 
+                                        embeds: [newEmbed], 
+                                        components: [] 
+                                    });
+                                    
+                                    db.prepare(`INSERT INTO paid_markers (debtorName, contractTitle, amount, markedBy, createdAt) VALUES (?, ?, ?, ?, ?)`)
+                                        .run('ВСЕ УЧАСТНИКИ', payment.title.split(' - ')[0] || 'Неизвестный контракт', 0, 'SYSTEM', Date.now());
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('Не удалось проверить все оплаты (авто):', err);
                     }
                     
                     logAction('WALLET_PAY_CONFIRM', i.user, `${participantName} | ${amount.toLocaleString()}$ (авто из кошелька)`);
