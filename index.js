@@ -269,7 +269,12 @@ client.on('messageCreate', async msg => {
                                 newLines.push('\n✅ **ВСЕ ОПЛАЧЕНО!** 🎉');
                                 const newDesc = newLines.join('\n');
                                 const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
-                                await freshMsg.edit({ embeds: [newEmbed] });
+                                
+                                // [!] УДАЛЯЕМ ВСЕ КНОПКИ
+                                await freshMsg.edit({ 
+                                    embeds: [newEmbed], 
+                                    components: []  // <-- ПУСТОЙ МАССИВ = НЕТ КНОПОК
+                                });
                                 
                                 db.prepare(`INSERT INTO paid_markers (debtorName, contractTitle, amount, markedBy, createdAt) VALUES (?, ?, ?, ?, ?)`)
                                     .run('ВСЕ УЧАСТНИКИ', contractTitle || 'Неизвестный контракт', 0, 'SYSTEM', Date.now());
@@ -1029,6 +1034,21 @@ client.on('interactionCreate', async i => {
                     }
                     if (updated) break;
                 }
+                // [!] СРАЗУ ЗАЧЁРКИВАЕМ В ЭМБЕДЕ (до подтверждения!)
+                try {
+                    const embed = i.message.embeds[0];
+                    if (embed) {
+                        const desc = embed.description || '';
+                        const newDesc = desc.replace(
+                            new RegExp(`[•-]\\s*<@!?\\d+>?\\s*${participantName}[^\\n]*\\n`, 'g'),
+                            `• ~~${participantName}~~ ⏳ **${amount.toLocaleString()} $** (ожидает подтверждения)\n`
+                        );
+                        const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
+                        await i.message.edit({ embeds: [newEmbed] });
+                    }
+                } catch (err) {
+                    console.warn('Не удалось обновить эмбед при нажатии:', err);
+                }
 
                 if (updated) {
                     await i.update({ components: rows });
@@ -1052,8 +1072,8 @@ client.on('interactionCreate', async i => {
                         if (embed) {
                             const desc = embed.description || '';
                             const newDesc = desc.replace(
-                                new RegExp(`• <@!?\\d+>?\\s*\\*\\*${participantName}.*?\\n`, 'g'),
-                                `• ~~${participantName}~~ ✅ **${amount.toLocaleString()} $** (💰 из кошелька)\n`
+                                new RegExp(`• ~~${participantName}~~ ⏳ \\*\\*${amount.toLocaleString()} \\$\\*\\* \\(ожидает подтверждения\\)`, 'g'),
+                                `• ~~${participantName}~~ ✅ **${amount.toLocaleString()} $**\n`
                             );
                             const newEmbed = EmbedBuilder.from(embed).setDescription(newDesc);
                             await i.message.edit({ embeds: [newEmbed], components: i.message.components });
