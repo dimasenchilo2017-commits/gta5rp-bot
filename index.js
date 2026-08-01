@@ -341,7 +341,9 @@ client.on('interactionCreate', async i => {
                     const memberMention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : p.name;
                     description += `• ${memberMention}: **${p.amount.toLocaleString()} $**\n`;
                     
-                    const customId = `pay_${p.name.replace(/\s/g, '_')}_${msgId}`;
+                    // [!] ГЕНЕРИРУЕМ УНИКАЛЬНЫЙ ID
+                    const uniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+                    const customId = `pay_${uniqueId}`;
                     buttons.push(
                         new ButtonBuilder()
                             .setCustomId(customId)
@@ -360,19 +362,20 @@ client.on('interactionCreate', async i => {
                     rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
                 }
 
-                const totalAmount = paymentData.reduce((sum, p) => sum + p.amount, 0);
                 const payMsg = await payChannel.send({
                     content: CONFIG.ALLOWED_ROLES.map(r => `<@&${r}>`).join(' ') + ` | ${executorMentions}`,
                     embeds: [payEmbed],
                     components: rows
                 });
 
-                // [!] Сохраняем отдельную запись для КАЖДОГО участника
-                for (const p of paymentData) {
+                // [!] Сохраняем запись для КАЖДОГО участника с УНИКАЛЬНЫМ paymentMsgId
+                for (let i = 0; i < paymentData.length; i++) {
+                    const p = paymentData[i];
+                    const customId = buttons[i].data.custom_id;
                     db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
                         .run(
                             msgId, 
-                            payMsg.id, 
+                            customId,  // <-- УНИКАЛЬНЫЙ ID!
                             contract.creatorId, 
                             `${oldEmbed.title} - ${p.name}`, 
                             p.amount, 
@@ -399,49 +402,81 @@ client.on('interactionCreate', async i => {
             if (i.commandName === 'Принудительно оплатить') {
                 await i.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const targetMsg = i.targetMessage;
-                if (!targetMsg.embeds?.[0]?.fields?.length) return i.editReply('❌ Не сообщение с платежом.');
+                if (!targetMsg.embeds?.[0]?.description) return i.editReply('❌ Не сообщение с платежом.');
 
                 const embed = targetMsg.embeds[0];
-                const contractTitle = embed?.title || 'Неизвестный контракт';
-                let totalPaid = 0;
+                const description = embed.description || '';
+                const lines = description.split('\n');
                 const participants = [];
+                let totalPaid = 0;
+                
+                for (const line of lines) {
+                    if (line.includes('**') && line.includes('$')) {
+                        const nameMatch = line.match(/\*\*([^*]+)\*\*/);
+                        const amountMatch = line.match(/\*\*([\d, ]+)\s*\$?/);
+                        if (nameMatch && amountMatch) {
+                            const name = nameMatch[1].trim().replace(/<@!?\d+>/g, '').trim();
+                            const amount = parseInt(amountMatch[1].replace(/\s/g, ''));
+                            if (amount > 0 && name) {
+                                participants.push({ name, amount });
+                                totalPaid += amount;
+                            }
+                        }
+                    }
+                }
 
-                embed.fields.forEach(field => {
-                    const amount = parseInt(field.value.replace(/\D/g, '')) || 0;
-                    if (amount > 0) { participants.push({ name: field.name, amount }); totalPaid += amount; }
-                });
+                if (participants.length === 0) {
+                    return i.editReply('❌ Нет участников для принудительной оплаты.');
+                }
 
-                if (participants.length === 0) return i.editReply('❌ Нет сумм.');
-                participants.forEach(p => deductDebt(p.name, p.amount));
+                for (const p of participants) {
+                    deductDebt(p.name, p.amount);
+                }
+                
                 db.prepare('DELETE FROM debtors WHERE amount <= 0').run();
                 if (totalPaid > 0) db.prepare('UPDATE treasury SET balance = balance + ? WHERE id = 1').run(totalPaid);
-                db.prepare('DELETE FROM pending_payments WHERE paymentMsgId = ?').run(targetMsg.id);
+                db.prepare('DELETE FROM pending_payments WHERE contractMsgId = ?').run(targetMsg.id);
 
-                await targetMsg.edit({ content: `✅ Принудительно оплачено! Проверяющий: <@${i.user.id}>`, components: [] }).catch(() => {});
-                logAction('FORCE_PAY', i.user, `${contractTitle} | ${totalPaid.toLocaleString()}$`);
-                return i.editReply(`✅ Оплата по "${contractTitle}" проведена. Сумма: ${totalPaid.toLocaleString()} $`);
+                await targetMsg.edit({ 
+                    content: `✅ Принудительно оплачено! Проверяющий: <@${i.user.id}>`, 
+                    components: [] 
+                }).catch(() => {});
+                
+                logAction('FORCE_PAY', i.user, `${participants.length} участников | ${totalPaid.toLocaleString()}$`);
+                return i.editReply(`✅ Принудительная оплата проведена! Сумма: ${totalPaid.toLocaleString()} $`);
             }
 
             if (i.commandName === 'Импортировать оплату') {
                 await i.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const targetMsg = i.targetMessage;
-                if (!targetMsg.embeds?.[0]?.fields?.length) return i.editReply('❌ Не сообщение с платежом.');
+                if (!targetMsg.embeds?.[0]?.description) return i.editReply('❌ Не сообщение с платежом.');
 
                 const embed = targetMsg.embeds[0];
                 const contractTitle = embed?.title || 'Неизвестный контракт';
-                let creatorId = targetMsg.content.match(/<@!?(\d+)>/)?.[1] || db.prepare('SELECT creatorId FROM active_contracts WHERE msgId = ?').get(targetMsg.id)?.creatorId;
+                const description = embed.description || '';
+                
+                let creatorId = targetMsg.content.match(/<@!?(\d+)>/)?.[1] || 
+                                db.prepare('SELECT creatorId FROM active_contracts WHERE msgId = ?').get(targetMsg.id)?.creatorId;
                 if (!creatorId) return i.editReply('❌ Не найден создатель.');
+                
                 if (db.prepare('SELECT 1 FROM pending_payments WHERE paymentMsgId = ?').get(targetMsg.id)) {
                     return i.editReply('⚠️ Уже в БД.');
                 }
 
+                const lines = description.split('\n');
                 let totalAmount = 0;
-                embed.fields.forEach(f => { totalAmount += parseInt(f.value.replace(/\D/g, '')) || 0; });
+                for (const line of lines) {
+                    const match = line.match(/\*\*([\d, ]+)\s*\$?/);
+                    if (match) {
+                        totalAmount += parseInt(match[1].replace(/\s/g, ''));
+                    }
+                }
 
                 db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
                     .run(targetMsg.id, targetMsg.id, creatorId, contractTitle, totalAmount, Date.now(), Date.now() + 72 * 60 * 60 * 1000);
+                
                 logAction('IMPORT_PAY', i.user, `${contractTitle} | ${totalAmount.toLocaleString()}$`);
-                return i.editReply(`✅ Оплата "${contractTitle}" добавлена.`);
+                return i.editReply(`✅ Оплата "${contractTitle}" добавлена. Сумма: ${totalAmount.toLocaleString()} $`);
             }
         }
 
@@ -779,27 +814,23 @@ client.on('interactionCreate', async i => {
         if (i.isButton()) {
             logButton(i);
 
-            // [!] НОВАЯ КНОПКА ДЛЯ ОПЛАТЫ УЧАСТНИКА (СУММА ИЗ БД!)
+            // [!] НОВАЯ КНОПКА ДЛЯ ОПЛАТЫ УЧАСТНИКА (СУММА ИЗ БД ПО paymentMsgId = customId!)
             if (i.customId.startsWith('pay_')) {
-                // Получаем данные из БД по сообщению с кнопками
-                const paymentMsgId = i.message.id;
-                const payment = db.prepare('SELECT * FROM pending_payments WHERE paymentMsgId = ? AND paid = 0').get(paymentMsgId);
+                // [!] Ищем в БД по paymentMsgId = i.customId (уникальный ID!)
+                const payment = db.prepare('SELECT * FROM pending_payments WHERE paymentMsgId = ? AND paid = 0').get(i.customId);
                 
                 if (!payment) {
                     return i.reply({ content: '❌ Платёж не найден или уже оплачен.', flags: [MessageFlags.Ephemeral] });
                 }
                 
-                // Извлекаем имя участника из title (формат: "Название контракта - Имя участника")
                 const participantName = payment.title.split(' - ')[1] || 'Неизвестный участник';
                 const amount = payment.totalAmount;
 
-                // Проверяем, есть ли скриншот
                 const messages = await i.channel.messages.fetch({ limit: 10 });
                 if (!messages.some(m => m.attachments.size > 0)) {
                     return i.reply({ content: '❌ Сначала прикрепите скриншот оплаты!', flags: [MessageFlags.Ephemeral] });
                 }
 
-                // Отключаем кнопку
                 const rows = i.message.components;
                 let updated = false;
                 for (const row of rows) {
@@ -819,7 +850,6 @@ client.on('interactionCreate', async i => {
                     await i.update({ components: rows });
                 }
 
-                // Создаём сообщение ожидания
                 const pendingMsg = await i.channel.send({
                     content: `⏳ **Ожидание подтверждения оплаты**\n` +
                              `👤 Участник: **${participantName}**\n` +
@@ -828,7 +858,6 @@ client.on('interactionCreate', async i => {
                              `Проверяющий, проверьте скриншот и ответьте на это сообщение командой \`!подтвердить\``
                 });
 
-                // Сохраняем данные об оплате
                 global.pendingMessages.set(pendingMsg.id, pendingMsg.id);
                 global.pendingPayments.set(pendingMsg.id, {
                     participantName: participantName,
@@ -921,7 +950,9 @@ client.on('interactionCreate', async i => {
                     const memberMention = memberInfo.mentions.length > 0 ? memberInfo.mentions[0] : p.name;
                     description += `• ${memberMention}: **${p.amount.toLocaleString()} $**\n`;
                     
-                    const customId = `pay_${p.name.replace(/\s/g, '_')}_${msgId}`;
+                    // [!] ГЕНЕРИРУЕМ УНИКАЛЬНЫЙ ID
+                    const uniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+                    const customId = `pay_${uniqueId}`;
                     buttons.push(
                         new ButtonBuilder()
                             .setCustomId(customId)
@@ -946,12 +977,14 @@ client.on('interactionCreate', async i => {
                     components: rows
                 });
 
-                // [!] Сохраняем отдельную запись для КАЖДОГО участника
-                for (const p of paymentData) {
+                // [!] Сохраняем запись для КАЖДОГО участника с УНИКАЛЬНЫМ paymentMsgId
+                for (let i = 0; i < paymentData.length; i++) {
+                    const p = paymentData[i];
+                    const customId = buttons[i].data.custom_id;
                     db.prepare(`INSERT INTO pending_payments (contractMsgId, paymentMsgId, creatorId, title, totalAmount, createdAt, deadline) VALUES (?, ?, ?, ?, ?, ?, ?)`)
                         .run(
                             msgId, 
-                            payMsg.id, 
+                            customId,  // <-- УНИКАЛЬНЫЙ ID!
                             creatorId, 
                             `${oldEmbed.title} - ${p.name}`, 
                             p.amount, 
