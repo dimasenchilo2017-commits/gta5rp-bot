@@ -95,7 +95,7 @@ db.exec(`
         lastRequestUserName TEXT,
         lastRequestAt INTEGER
     );
-    INSERT OR IGNORE INTO stats_message (id, channelId, messageId, updatedAt) VALUES (1, NULL, NULL, 0, NULL, NULL, 0);
+    INSERT OR IGNORE INTO stats_message (id, channelId, messageId, updatedAt, lastRequestUserId, lastRequestUserName, lastRequestAt) VALUES (1, NULL, NULL, 0, NULL, NULL, 0);
 
     CREATE TABLE IF NOT EXISTS player_stats_messages (
         playerName TEXT PRIMARY KEY,
