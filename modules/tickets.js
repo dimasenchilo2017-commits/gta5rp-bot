@@ -8,7 +8,7 @@ function saveTicket(ticketId, channelId, userId, topic, status = 'open') {
 }
 
 function closeTicket(channelId) {
-    db.prepare('UPDATE tickets SET status = "closed", closedAt = ? WHERE channelId = ?')
+    db.prepare("UPDATE tickets SET status = 'closed', closedAt = ? WHERE channelId = ?")
         .run(Date.now(), channelId);
 }
 
