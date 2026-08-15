@@ -421,11 +421,9 @@ client.on('interactionCreate', async i => {
                     const description = i.options.getString('описание') || 'Нажмите на реакцию, чтобы получить роль.';
                     
                     const embed = new EmbedBuilder()
-                        .setTitle(`🎯 ${title}`)
+                        .setTitle(` ${title}`)
                         .setDescription(description)
                         .setColor(0x0099FF)
-                        .setTimestamp()
-                        .setFooter({ text: `Создал: ${i.user.tag}` });
                     
                     const msg = await i.channel.send({ embeds: [embed] });
                     await i.reply({ content: '✅ Сообщение создано! Добавьте роли через `/добавить_роль`', flags: [MessageFlags.Ephemeral] });
