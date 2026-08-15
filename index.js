@@ -25,8 +25,9 @@ const ticketsModule = require('./modules/tickets.js');
 const CONFIG = {
     PICK: process.env.PICK,
     PROCESS: process.env.PROCESS,
-    PAY: process.env.PAY,
+    ADMIN_PICK: process.env.ADMIN_PICK,
     STATS_CHANNEL: process.env.STATS_CHANNEL,
+    RECRUIT_CHANNEL: process.env.RECRUIT_CHANNEL,
     RECRUITER_ROLE: process.env.RECRUITER_ROLE,
     DEP_LEAD_ROLE: process.env.DEP_LEAD_ROLE,
     LEAD_ROLE: process.env.LEAD_ROLE,
