@@ -556,7 +556,7 @@ client.on('interactionCreate', async i => {
                     if (!hasRole) return i.reply({ content: '❌ Нет прав.', flags: [MessageFlags.Ephemeral] });
                     
                     const embed = new EmbedBuilder()
-                        .setTitle('📋 ВСТУПЛЕНИЕ В СЕМЬЮ NUERRA')
+                        .setTitle('https://discord.gg/uxHeDFevXT\n\n📋 ВСТУПЛЕНИЕ В СЕМЬЮ NUERRA')
                         .setDescription(
                             'Нажми на кнопку **"Начать вступление"**, чтобы открыть анкету.\n\n' +
                             '📌 **Что нужно сделать:**\n' +
