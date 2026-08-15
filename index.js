@@ -217,6 +217,8 @@ client.on('interactionCreate', async i => {
                         new ButtonBuilder().setCustomId('start').setLabel('📝 Создать контракт').setStyle(ButtonStyle.Primary)
                     );
                     
+                    const pingContent = `<@&1534213329294327926> <@&1534213329294327925> <@&1534213329294327924>`;
+
                     const saved = db.prepare('SELECT messageId FROM pick_message WHERE id = 1').get();
                     let msg = null;
                     if (saved && saved.messageId) {

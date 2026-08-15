@@ -46,7 +46,7 @@ function closeContract(contractId, status, closedBy) {
     const contract = db.prepare('SELECT * FROM contracts WHERE id = ?').get(contractId);
     if (!contract || contract.status !== 'active') return null;
 
-    db.prepare(`UPDATE contracts SET status = ?, closedAt = ? WHERE id = ?`).run(status, Date.now(), contractId);
+    db.prepare("UPDATE contracts SET status = ?, closedAt = ? WHERE id = ?").run(status, Date.now(), contractId);
     db.prepare(`INSERT INTO contract_history (contractId, action, oldStatus, newStatus, changedBy, changedAt) VALUES (?, 'close', ?, ?, ?, ?)`)
         .run(contractId, 'active', status, closedBy, Date.now());
 
@@ -87,11 +87,11 @@ function getPlayerStats(playerName) {
 }
 
 function getGeneralStats() {
-    const totalContracts = db.prepare('SELECT COUNT(*) as count FROM contracts WHERE status != "active"').get().count || 0;
+    const totalContracts = db.prepare("SELECT COUNT(*) as count FROM contracts WHERE status != 'active'").get().count || 0;
     const successContracts = db.prepare("SELECT COUNT(*) as count FROM contracts WHERE status = 'success'").get().count || 0;
     const failContracts = db.prepare("SELECT COUNT(*) as count FROM contracts WHERE status = 'fail'").get().count || 0;
     const activeContracts = db.prepare("SELECT COUNT(*) as count FROM contracts WHERE status = 'active'").get().count || 0;
-    const totalPayout = db.prepare('SELECT SUM(totalPayout) as total FROM contracts WHERE status = "success"').get().total || 0;
+    const totalPayout = db.prepare("SELECT SUM(totalPayout) as total FROM contracts WHERE status = 'success'").get().total || 0;
     
     const topByPayout = db.prepare(`SELECT playerName, totalContracts, successContracts, failContracts, totalPayout, ROUND((successContracts * 100.0 / totalContracts), 1) as successRate FROM player_stats WHERE totalContracts > 0 ORDER BY totalPayout DESC LIMIT 10`).all();
     const topBySuccess = db.prepare(`SELECT playerName, totalContracts, successContracts, failContracts, totalPayout, ROUND((successContracts * 100.0 / totalContracts), 1) as successRate FROM player_stats WHERE totalContracts >= 5 ORDER BY successRate DESC LIMIT 10`).all();
