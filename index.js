@@ -71,7 +71,60 @@ client.once('clientReady', async () => {
             }
         } catch (err) { console.error('[ERROR] Админ-панель:', err); }
     }
+
+    // ===== СИНХРОНИЗАЦИЯ СТАРЫХ РЕАКЦИЙ =====
+    setTimeout(async () => {
+        console.log('🔄 Синхронизация старых реакций...');
+        await syncOldReactions();
+    }, 5000);
 });
+
+// ===== ФУНКЦИЯ СИНХРОНИЗАЦИИ =====
+async function syncOldReactions() {
+    console.log('🔄 Синхронизация старых реакций...');
+    
+    const messages = db.prepare('SELECT DISTINCT messageId FROM role_messages').all();
+    let totalSynced = 0;
+    
+    for (const row of messages) {
+        try {
+            const channel = await client.channels.fetch('1534951687683440710');
+            const msg = await channel.messages.fetch(row.messageId);
+            if (!msg) continue;
+            
+            const reactions = msg.reactions.cache;
+            for (const [emoji, reaction] of reactions) {
+                try {
+                    const users = await reaction.users.fetch();
+                    for (const user of users.values()) {
+                        if (user.bot) continue;
+                        const roleData = rolesModule.getRoleByReaction(msg.id, emoji);
+                        if (!roleData) continue;
+                        
+                        const member = await msg.guild.members.fetch(user.id);
+                        if (!member) continue;
+                        
+                        const role = msg.guild.roles.cache.get(roleData.roleId);
+                        if (!role) continue;
+                        
+                        if (!member.roles.cache.has(role.id)) {
+                            await member.roles.add(role);
+                            logAction('ROLE_ADD', user, `Выдана роль ${role.name} (синхронизация)`);
+                            totalSynced++;
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`Ошибка синхронизации реакции ${emoji}:`, err);
+                }
+            }
+        } catch (err) {
+            console.warn(`Ошибка получения сообщения ${row.messageId}:`, err);
+        }
+    }
+    
+    console.log(`✅ Синхронизация завершена! Выдано ${totalSynced} ролей.`);
+}
+
 
 client.on('guildMemberAdd', async (member) => {
     try {
