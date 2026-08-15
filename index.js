@@ -724,7 +724,7 @@ client.on('interactionCreate', async i => {
                 const ticketId = `recruit-${Date.now().toString(36)}`;
                 ticketsModule.saveTicket(ticketId, channel.id, i.user.id, 'Вступление в семью', 'open');
                 
-                const recruitChannel = i.guild.channels.cache.find(ch => ch.name === 'рекруты' || ch.name === 'набор' || ch.name === 'рекрутинг' || ch.name === 'вступление');
+                const recruitChannel = await client.channels.fetch(CONFIG.RECRUIT_CHANNEL);
                 
                 const embed = new EmbedBuilder()
                     .setTitle('📋 НОВАЯ АНКЕТА')
