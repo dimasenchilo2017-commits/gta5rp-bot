@@ -88,17 +88,31 @@ client.on('guildMemberAdd', async (member) => {
 
 client.on('messageReactionAdd', async (reaction, user) => {
     if (user.bot) return;
+    
     try {
         const roleData = rolesModule.getRoleByReaction(reaction.message.id, reaction.emoji.name || reaction.emoji.id);
         if (!roleData) return;
+        
         const member = await reaction.message.guild.members.fetch(user.id);
         if (!member) return;
+        
         const role = reaction.message.guild.roles.cache.get(roleData.roleId);
         if (!role) return;
-        await member.roles.add(role);
-        logAction('ROLE_ADD', user, `Выдана роль ${role.name}`);
+        
+        // Проверяем, есть ли уже роль
+        if (member.roles.cache.has(role.id)) {
+            await member.roles.remove(role);
+            logAction('ROLE_REMOVE', user, `Снята роль ${role.name} (по реакции)`);
+        } else {
+            await member.roles.add(role);
+            logAction('ROLE_ADD', user, `Выдана роль ${role.name} (по реакции)`);
+        }
+        
+        // Убираем реакцию
+        await reaction.users.remove(user.id);
+        
     } catch (err) {
-        console.error('Ошибка выдачи роли:', err);
+        console.error('Ошибка обработки реакции:', err);
     }
 });
 
