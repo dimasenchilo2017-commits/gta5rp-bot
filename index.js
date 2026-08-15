@@ -585,24 +585,34 @@ client.on('interactionCreate', async i => {
                     return i.reply({ content: '❌ Только создатель или админ.', flags: [MessageFlags.Ephemeral] });
                 }
                 
+                // Закрываем контракт
                 const result = closeContract(contractId, status, i.user.id);
                 if (!result) return i.reply({ content: '❌ Ошибка закрытия.', flags: [MessageFlags.Ephemeral] });
                 
-                // ОБНОВЛЯЕМ СООБЩЕНИЕ
+                // ===== ОБНОВЛЯЕМ СООБЩЕНИЕ =====
                 try {
                     const channel = await client.channels.fetch(contract.channelId);
                     const msg = await channel.messages.fetch(contract.msgId);
                     if (msg) {
+                        // Меняем цвет и добавляем статус
                         const embed = EmbedBuilder.from(msg.embeds[0])
                             .setColor(status === 'success' ? 0x00FF00 : 0xFF0000)
                             .setDescription(`${msg.embeds[0].description}\n\n**Статус:** ${status === 'success' ? '✅ УСПЕХ' : '❌ ПРОВАЛ'}`);
-                        await msg.edit({ embeds: [embed], components: [] });  // ← УБИРАЕТ КНОПКИ
+                        
+                        // Убираем кнопки
+                        await msg.edit({ 
+                            embeds: [embed], 
+                            components: [] 
+                        });
                     }
                 } catch (err) {
-                    console.warn('Не удалось обновить сообщение:', err);
+                    console.error('Ошибка обновления сообщения:', err);
                 }
                 
+                // Обновляем статистику
                 await updateStatsMessage(client, CONFIG.STATS_CHANNEL);
+                
+                // Ответ пользователю
                 await i.reply({ 
                     content: `✅ Контракт закрыт! Статус: ${status === 'success' ? 'УСПЕХ' : 'ПРОВАЛ'}`,
                     flags: [MessageFlags.Ephemeral] 
