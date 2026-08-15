@@ -590,7 +590,7 @@ client.on('interactionCreate', async i => {
                 
                 // ===== ОБНОВЛЯЕМ СООБЩЕНИЕ =====
                 try {
-                    const channel = await client.channels.fetch(contract.channelId);
+                    const channel = await client.channels.fetch(CONFIG.PROCESS);
                     const msg = await channel.messages.fetch(contract.msgId);
                     if (msg && msg.embeds.length > 0) {
                         // Берём текущий эмбед
