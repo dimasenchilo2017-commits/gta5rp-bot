@@ -16,4 +16,8 @@ function removeAutoRole(serverId) {
     db.prepare('DELETE FROM auto_roles WHERE serverId = ?').run(serverId);
 }
 
-module.exports = { setAutoRole, getAutoRole, removeAutoRole };
+function getAllAutoRoles() {
+    return db.prepare('SELECT serverId, roleId FROM auto_roles').all();
+}
+
+module.exports = { setAutoRole, getAutoRole, removeAutoRole, getAllAutoRoles };
