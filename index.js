@@ -116,22 +116,6 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 });
 
-client.on('messageReactionRemove', async (reaction, user) => {
-    if (user.bot) return;
-    try {
-        const roleData = rolesModule.getRoleByReaction(reaction.message.id, reaction.emoji.name || reaction.emoji.id);
-        if (!roleData) return;
-        const member = await reaction.message.guild.members.fetch(user.id);
-        if (!member) return;
-        const role = reaction.message.guild.roles.cache.get(roleData.roleId);
-        if (!role) return;
-        await member.roles.remove(role);
-        logAction('ROLE_REMOVE', user, `Снята роль ${role.name}`);
-    } catch (err) {
-        console.error('Ошибка снятия роли:', err);
-    }
-});
-
 client.on('interactionCreate', async i => {
     try {
         if (i.isAutocomplete()) {
