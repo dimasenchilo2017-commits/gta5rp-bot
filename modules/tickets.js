@@ -13,7 +13,7 @@ function closeTicket(channelId) {
 }
 
 function getTicketByChannel(channelId) {
-    return db.prepare('SELECT * FROM tickets WHERE channelId = ? AND status = "open"').get(channelId);
+    return db.prepare("SELECT * FROM tickets WHERE channelId = ? AND status = 'open'").get(channelId);
 }
 
 function getTicketByUser(userId) {
