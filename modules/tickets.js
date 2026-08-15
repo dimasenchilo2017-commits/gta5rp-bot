@@ -17,7 +17,7 @@ function getTicketByChannel(channelId) {
 }
 
 function getTicketByUser(userId) {
-    return db.prepare('SELECT * FROM tickets WHERE userId = ? AND status = "open"').get(userId);
+    return db.prepare("SELECT * FROM tickets WHERE userId = ? AND status = 'open'").get(userId);
 }
 
 module.exports = { saveTicket, closeTicket, getTicketByChannel, getTicketByUser };
