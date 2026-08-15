@@ -621,6 +621,34 @@ client.on('interactionCreate', async i => {
                     );
                 return i.showModal(modal);
             }
+
+            if (i.customId && i.customId.startsWith('close_ticket_')) {
+            const ticket = ticketsModule.getTicketByChannel(i.channel.id);
+            
+            if (!ticket) {
+                return i.reply({ content: '❌ Это не канал тикета.', flags: [MessageFlags.Ephemeral] });
+            }
+            
+            const isAdmin = i.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
+            if (i.user.id !== ticket.userId && !isAdmin) {
+                return i.reply({ content: '❌ Только кандидат или админ могут закрыть тикет.', flags: [MessageFlags.Ephemeral] });
+            }
+            
+            ticketsModule.closeTicket(i.channel.id);
+            
+            await i.channel.send({
+                content: `🔒 Тикет закрыт <@${i.user.id}>`
+            });
+            
+            setTimeout(async () => {
+                try { await i.channel.delete(); } catch (err) {}
+            }, 5000);
+            
+            await i.reply({ 
+                content: '✅ Тикет закрыт! Канал будет удалён через 5 секунд.',
+                flags: [MessageFlags.Ephemeral] 
+            });
+        }
         }
 
         if (i.isModalSubmit()) {
@@ -703,7 +731,6 @@ client.on('interactionCreate', async i => {
                     return i.reply({ content: `❌ У вас уже есть открытый тикет! <#${existing.channelId}>`, flags: [MessageFlags.Ephemeral] });
                 }
                 
-                // Проверяем, есть ли категория ВСТУПЛЕНИЕ
                 let category = i.guild.channels.cache.find(c => c.type === 4 && c.name === 'ВСТУПЛЕНИЕ');
                 if (!category) {
                     category = await i.guild.channels.create({ name: 'ВСТУПЛЕНИЕ', type: 4 });
@@ -726,42 +753,37 @@ client.on('interactionCreate', async i => {
                 const ticketId = `recruit-${Date.now().toString(36)}`;
                 ticketsModule.saveTicket(ticketId, channel.id, i.user.id, 'Вступление в семью', 'open');
                 
-                // ОТПРАВКА АНКЕТЫ В КАНАЛ РЕКРУТИНГА
-                const recruitChannel = await client.channels.fetch(CONFIG.RECRUIT_CHANNEL);
-                
-                const embed = new EmbedBuilder()
-                    .setTitle('📋 НОВАЯ АНКЕТА')
-                    .setColor(0x00FF00)
-                    .setDescription(
-                        `**Кандидат:** <@${i.user.id}>\n\n` +
-                        `**Никнейм:** ${nickname}\n` +
-                        `**Вступление:** ${role}\n` +
-                        `**Онлайн:** ${online}\n` +
-                        `**Направление:** ${direction}\n\n` +
-                        `**Почему хочет вступить:**\n${why}`
-                    )
-                    .setTimestamp()
-                    .setFooter({ text: `Тикет: ${ticketId}` });
-                
-                if (recruitChannel) {
-                    await recruitChannel.send({
-                        content: CONFIG.ALLOWED_ROLES.map(r => `<@&${r}>`).join(' '),
-                        embeds: [embed]
-                    });
-                }
-                
-                await channel.send({ 
-                    content: `✅ Анкета отправлена! Канал будет удалён через 5 секунд.`,
-                    embeds: [new EmbedBuilder().setDescription(`Спасибо, **${nickname}**! Твоя анкета отправлена на рассмотрение.`).setColor(0x00FF00)]
+                // ===== СООБЩЕНИЕ В КАНАЛЕ ТИКЕТА С КНОПКОЙ =====
+                await channel.send({
+                    content: `👋 Добро пожаловать, <@${i.user.id}>! Рекрутеры скоро ответят.`,
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('📋 ТИКЕТ НА ВСТУПЛЕНИЕ')
+                            .setDescription(
+                                `**Кандидат:** <@${i.user.id}>\n` +
+                                `**Никнейм:** ${nickname}\n` +
+                                `**Вступление:** ${role}\n` +
+                                `**Онлайн:** ${online}\n` +
+                                `**Направление:** ${direction}\n\n` +
+                                `Задайте вопросы кандидату в этом канале.`
+                            )
+                            .setColor(0x0099FF)
+                            .setTimestamp()
+                    ],
+                    components: [
+                        new ActionRowBuilder().addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`close_ticket_${ticketId}`)
+                                .setLabel('🔒 Закрыть тикет')
+                                .setStyle(ButtonStyle.Danger)
+                        )
+                    ]
                 });
                 
-                ticketsModule.closeTicket(channel.id);
-                
-                setTimeout(async () => {
-                    try { await channel.delete(); } catch (err) {}
-                }, 5000);
-                
-                await i.reply({ content: `✅ Анкета отправлена!`, flags: [MessageFlags.Ephemeral] });
+                await i.reply({ 
+                    content: `✅ Анкета отправлена! Канал создан: ${channel}`,
+                    flags: [MessageFlags.Ephemeral] 
+                });
                 return;
             }
 
