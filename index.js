@@ -588,6 +588,7 @@ client.on('interactionCreate', async i => {
                 const result = closeContract(contractId, status, i.user.id);
                 if (!result) return i.reply({ content: '❌ Ошибка закрытия.', flags: [MessageFlags.Ephemeral] });
                 
+                // ОБНОВЛЯЕМ СООБЩЕНИЕ
                 try {
                     const channel = await client.channels.fetch(contract.channelId);
                     const msg = await channel.messages.fetch(contract.msgId);
@@ -595,12 +596,17 @@ client.on('interactionCreate', async i => {
                         const embed = EmbedBuilder.from(msg.embeds[0])
                             .setColor(status === 'success' ? 0x00FF00 : 0xFF0000)
                             .setDescription(`${msg.embeds[0].description}\n\n**Статус:** ${status === 'success' ? '✅ УСПЕХ' : '❌ ПРОВАЛ'}`);
-                        await msg.edit({ embeds: [embed], components: [] });
+                        await msg.edit({ embeds: [embed], components: [] });  // ← УБИРАЕТ КНОПКИ
                     }
-                } catch (err) {}
+                } catch (err) {
+                    console.warn('Не удалось обновить сообщение:', err);
+                }
                 
                 await updateStatsMessage(client, CONFIG.STATS_CHANNEL);
-                await i.reply({ content: `✅ Контракт закрыт! Статус: ${status === 'success' ? 'УСПЕХ' : 'ПРОВАЛ'}`, flags: [MessageFlags.Ephemeral] });
+                await i.reply({ 
+                    content: `✅ Контракт закрыт! Статус: ${status === 'success' ? 'УСПЕХ' : 'ПРОВАЛ'}`,
+                    flags: [MessageFlags.Ephemeral] 
+                });
                 return;
             }
 
@@ -688,7 +694,7 @@ client.on('interactionCreate', async i => {
                     .addFields(
                         participants.map(p => ({
                             name: p.name,
-                            value: `Векселей: ${p.bills} | Ожидаемая выплата: ${(p.bills * 1000 * (percent / 100)).toLocaleString()} $`,
+                            value: `Векселей: ${p.bills} | Ожидаемая выплата: ${(p.bills * 1000).toLocaleString()} $`,
                             inline: false
                         }))
                     )
