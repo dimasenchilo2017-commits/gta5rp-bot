@@ -1,7 +1,7 @@
 // members.js — полный список участников фракции Nuerra
 module.exports = [
     // ===== ЛИДЕР =====
-    { discordId: '379679942910410762', gameName: 'Artem Nuerra', group: 'lead' },
+    { discordId: '702529657718833162', gameName: 'Artem Nuerra', group: 'lead' },
     { discordId: '702879971252895774', gameName: 'Yuto Nuerra', group: 'lead' },
     
     // ===== ЗАМЕСТИТЕЛИ ЛИДЕРА =====
