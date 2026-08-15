@@ -127,36 +127,7 @@ async function syncOldReactions() {
     
     console.log(`✅ Синхронизация завершена! Выдано ${totalSynced} ролей.`);
 
-    // ===== 2. СИНХРОНИЗАЦИЯ АВТОРОЛЕЙ =====
-    console.log('🔄 Синхронизация авторолей...');
     
-    const autoRoles = autoRoleModule.getAllAutoRoles();
-    let totalAutoSynced = 0;
-    
-    for (const ar of autoRoles) {
-        try {
-            const guild = await client.guilds.fetch(ar.serverId);
-            if (!guild) continue;
-            
-            const role = guild.roles.cache.get(ar.roleId);
-            if (!role) continue;
-            
-            // Получаем всех участников без этой роли
-            const members = await guild.members.fetch();
-            for (const [memberId, member] of members) {
-                if (member.user.bot) continue;
-                if (!member.roles.cache.has(ar.roleId)) {
-                    await member.roles.add(ar.roleId);
-                    logAction('AUTO_ROLE', member.user, `Выдана роль ${role.name} (синхронизация)`);
-                    totalAutoSynced++;
-                }
-            }
-        } catch (err) {
-            console.warn(`Ошибка синхронизации автороли ${ar.roleId}:`, err);
-        }
-    }
-    
-    console.log(`✅ Синхронизация авторолей завершена! Выдано ${totalAutoSynced} ролей.`);
 }
 
 
