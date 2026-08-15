@@ -754,7 +754,7 @@ client.on('interactionCreate', async i => {
                 
                 // ===== СООБЩЕНИЕ В КАНАЛЕ ТИКЕТА С КНОПКОЙ =====
                 await channel.send({
-                    content: `👋 Добро пожаловать, <@${i.user.id}>! Рекрутеры скоро ответят.`,
+                    content: `👋 Добро пожаловать, <@${i.user.id}>! <@&${CONFIG.RECRUITER_ROLE}> <@&${CONFIG.DEP_LEAD_ROLE}> скоро ответят.`,
                     embeds: [
                         new EmbedBuilder()
                             .setTitle('📋 ТИКЕТ НА ВСТУПЛЕНИЕ')
