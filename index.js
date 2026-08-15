@@ -702,6 +702,7 @@ client.on('interactionCreate', async i => {
                     return i.reply({ content: `❌ У вас уже есть открытый тикет! <#${existing.channelId}>`, flags: [MessageFlags.Ephemeral] });
                 }
                 
+                // Проверяем, есть ли категория ВСТУПЛЕНИЕ
                 let category = i.guild.channels.cache.find(c => c.type === 4 && c.name === 'ВСТУПЛЕНИЕ');
                 if (!category) {
                     category = await i.guild.channels.create({ name: 'ВСТУПЛЕНИЕ', type: 4 });
@@ -724,6 +725,7 @@ client.on('interactionCreate', async i => {
                 const ticketId = `recruit-${Date.now().toString(36)}`;
                 ticketsModule.saveTicket(ticketId, channel.id, i.user.id, 'Вступление в семью', 'open');
                 
+                // ОТПРАВКА АНКЕТЫ В КАНАЛ РЕКРУТИНГА
                 const recruitChannel = await client.channels.fetch(CONFIG.RECRUIT_CHANNEL);
                 
                 const embed = new EmbedBuilder()
