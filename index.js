@@ -112,6 +112,9 @@ async function syncOldReactions() {
                             logAction('ROLE_ADD', user, `Выдана роль ${role.name} (синхронизация)`);
                             totalSynced++;
                         }
+                        try {
+                            await reaction.users.remove(user.id);
+                        } catch (err) {}
                     }
                 } catch (err) {
                     console.warn(`Ошибка синхронизации реакции ${emoji}:`, err);
