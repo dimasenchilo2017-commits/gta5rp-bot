@@ -87,6 +87,7 @@ client.on('guildMemberAdd', async (member) => {
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
+    console.log('⚡ РЕАКЦИЯ:', reaction.emoji.name, user.tag);
     if (user.bot) return;
     
     try {
