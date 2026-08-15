@@ -527,6 +527,49 @@ client.on('interactionCreate', async i => {
                 default: {
                     await i.reply({ content: '⚠️ Команда в разработке.', flags: [MessageFlags.Ephemeral] });
                 }
+
+                case 'восстановить_роли': {
+                const hasRole = i.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
+                if (!hasRole) {
+                    return i.reply({ content: '❌ Нет прав.', flags: [MessageFlags.Ephemeral] });
+                }
+                
+                // Пол
+                const полMessageId = '1538292961735999611';
+                const мужчинаRoleId = '1534938582480060416';
+                const женщинаRoleId = '1534937914776092913';
+                
+                const мужчинаRole = i.guild.roles.cache.get(мужчинаRoleId);
+                const женщинаRole = i.guild.roles.cache.get(женщинаRoleId);
+                
+                if (мужчинаRole) {
+                    rolesModule.saveRoleMessage(полMessageId, i.channel.id, мужчинаRoleId, '♂️', 'Пол', 'Мужчина');
+                }
+                if (женщинаRole) {
+                    rolesModule.saveRoleMessage(полMessageId, i.channel.id, женщинаRoleId, '♀️', 'Пол', 'Женщина');
+                }
+                
+                // Сторона
+                const сторонаMessageId = '1538293139708579913';
+                const госслужащийRoleId = '1534932517248045156';
+                const краймRoleId = '1534932721543938200';
+                
+                const госслужащийRole = i.guild.roles.cache.get(госслужащийRoleId);
+                const краймRole = i.guild.roles.cache.get(краймRoleId);
+                
+                if (госслужащийRole) {
+                    rolesModule.saveRoleMessage(сторонаMessageId, i.channel.id, госслужащийRoleId, '👮', 'Сторона', 'Государство');
+                }
+                if (краймRole) {
+                    rolesModule.saveRoleMessage(сторонаMessageId, i.channel.id, краймRoleId, '🔫', 'Сторона', 'Криминал');
+                }
+                
+                await i.reply({ 
+                    content: '✅ Все роли восстановлены!',
+                    flags: [MessageFlags.Ephemeral] 
+                });
+                break;
+            }
             }
             return;
         }

@@ -86,6 +86,11 @@ module.exports = [
     new SlashCommandBuilder()
         .setName('рекрут')
         .setDescription('Создать панель для набора в семью (админ)'),
+    
+    // ===== ВОССТАНОВЛЕНИЕ РОЛЕЙ ======
+    new SlashCommandBuilder()
+    .setName('восстановить_роли')
+    .setDescription('Восстановить все роли после сброса БД (админ)'),
 
     // ===== КОНТЕКСТНОЕ МЕНЮ =====
     { name: 'Закрыть контракт', type: ApplicationCommandType.Message },
