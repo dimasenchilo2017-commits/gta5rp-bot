@@ -229,11 +229,11 @@ client.on('interactionCreate', async i => {
                     }
                     
                     if (msg) {
-                        await msg.edit({ embeds: [embed], components: [row] });
+                        await msg.edit({ content: pingContent, embeds: [embed], components: [row] });
                         await i.reply({ content: '✅ Правила обновлены!', flags: [MessageFlags.Ephemeral] });
                     } else {
                         const channel = await client.channels.fetch(CONFIG.PICK);
-                        const newMsg = await channel.send({ embeds: [embed], components: [row] });
+                        const newMsg = await channel.send({ content: pingContent, embeds: [embed], components: [row] });
                         db.prepare('UPDATE pick_message SET messageId = ?, channelId = ?, updatedAt = ? WHERE id = 1')
                             .run(newMsg.id, CONFIG.PICK, Date.now());
                         await i.reply({ content: '✅ Правила созданы!', flags: [MessageFlags.Ephemeral] });
