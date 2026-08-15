@@ -585,7 +585,6 @@ client.on('interactionCreate', async i => {
                     return i.reply({ content: '❌ Только создатель или админ.', flags: [MessageFlags.Ephemeral] });
                 }
                 
-                // Закрываем контракт
                 const result = closeContract(contractId, status, i.user.id);
                 if (!result) return i.reply({ content: '❌ Ошибка закрытия.', flags: [MessageFlags.Ephemeral] });
                 
@@ -593,15 +592,22 @@ client.on('interactionCreate', async i => {
                 try {
                     const channel = await client.channels.fetch(contract.channelId);
                     const msg = await channel.messages.fetch(contract.msgId);
-                    if (msg) {
-                        // Меняем цвет и добавляем статус
-                        const embed = EmbedBuilder.from(msg.embeds[0])
+                    if (msg && msg.embeds.length > 0) {
+                        // Берём текущий эмбед
+                        const oldEmbed = msg.embeds[0];
+                        const oldDescription = oldEmbed.description || '';
+                        
+                        // Создаём новый эмбед
+                        const newEmbed = new EmbedBuilder()
+                            .setTitle(oldEmbed.title)
                             .setColor(status === 'success' ? 0x00FF00 : 0xFF0000)
-                            .setDescription(`${msg.embeds[0].description}\n\n**Статус:** ${status === 'success' ? '✅ УСПЕХ' : '❌ ПРОВАЛ'}`);
+                            .setDescription(`${oldDescription}\n\n**Статус:** ${status === 'success' ? '✅ УСПЕХ' : '❌ ПРОВАЛ'}`)
+                            .setTimestamp()
+                            .setFooter(oldEmbed.footer ? { text: oldEmbed.footer.text } : null);
                         
                         // Убираем кнопки
                         await msg.edit({ 
-                            embeds: [embed], 
+                            embeds: [newEmbed], 
                             components: [] 
                         });
                     }
@@ -609,10 +615,7 @@ client.on('interactionCreate', async i => {
                     console.error('Ошибка обновления сообщения:', err);
                 }
                 
-                // Обновляем статистику
                 await updateStatsMessage(client, CONFIG.STATS_CHANNEL);
-                
-                // Ответ пользователю
                 await i.reply({ 
                     content: `✅ Контракт закрыт! Статус: ${status === 'success' ? 'УСПЕХ' : 'ПРОВАЛ'}`,
                     flags: [MessageFlags.Ephemeral] 
