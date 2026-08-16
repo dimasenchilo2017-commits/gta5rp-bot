@@ -76,8 +76,8 @@ client.once('clientReady', async () => {
     client.user.setPresence({
         activities: [
             {
-                name: 'за Nuerra FamQ 🏴',
-                type: 3,
+                name: 'Наблюдает за Nuerra FamQ 🏴',
+                type: 0,
             },
         ],
         status: 'online',
