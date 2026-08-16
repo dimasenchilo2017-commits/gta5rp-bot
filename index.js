@@ -996,6 +996,7 @@ async function updateStatsMessage(client, statsChannelId, requestedBy = null) {
     try {
         const stats = getGeneralStats();
         const treasury = getTreasury();
+        const weekDigest = require('./modules/digest.js').getWeekDigestEmbed();
         
         if (requestedBy) {
             saveStatsLastRequest(requestedBy.id, requestedBy.tag);
@@ -1003,7 +1004,8 @@ async function updateStatsMessage(client, statsChannelId, requestedBy = null) {
         
         const lastRequest = getStatsLastRequest();
         
-        const embed = new EmbedBuilder()
+        // ОБЩАЯ СТАТИСТИКА
+        const mainEmbed = new EmbedBuilder()
             .setTitle('📊 ОБЩАЯ СТАТИСТИКА')
             .setColor(0x0099FF)
             .setTimestamp()
@@ -1016,18 +1018,20 @@ async function updateStatsMessage(client, statsChannelId, requestedBy = null) {
                 { name: '💰 В казне', value: `${(treasury?.balance || 0).toLocaleString()} $`, inline: true }
             );
         
+        // ТОП-5 ПО ПРИБЫЛИ
         if (stats.topByPayout && stats.topByPayout.length > 0) {
             const text = stats.topByPayout.slice(0, 5).map((p, i) => 
                 `${i+1}. ${p.playerName} — ${p.totalPayout.toLocaleString()} $ (${p.successRate || 0}%)`
             ).join('\n');
-            embed.addFields({ name: '🏆 ТОП-5 ПО ПРИБЫЛИ', value: text, inline: false });
+            mainEmbed.addFields({ name: '🏆 ТОП-5 ПО ПРИБЫЛИ', value: text, inline: false });
         }
         
+        // ТОП-5 ПО ПОПОЛНЕНИЯМ КАЗНЫ
         if (stats.topByTreasury && stats.topByTreasury.length > 0) {
             const text = stats.topByTreasury.slice(0, 5).map((p, i) => 
                 `${i+1}. ${p.playerName} — ${p.treasuryTotal.toLocaleString()} $ (${p.treasuryDeposits || 0} раз)`
             ).join('\n');
-            embed.addFields({ name: '💰 ТОП-5 ПО ПОПОЛНЕНИЯМ КАЗНЫ', value: text, inline: false });
+            mainEmbed.addFields({ name: '💰 ТОП-5 ПО ПОПОЛНЕНИЯМ КАЗНЫ', value: text, inline: false });
         }
         
         let footerText = `Обновлено: ${new Date().toLocaleString('ru-RU')}`;
@@ -1036,7 +1040,22 @@ async function updateStatsMessage(client, statsChannelId, requestedBy = null) {
             const userName = lastRequest.lastRequestUserName || 'Неизвестно';
             footerText += ` | Последний запрос: ${userName} (${date})`;
         }
-        embed.setFooter({ text: footerText });
+        mainEmbed.setFooter({ text: footerText });
+        
+        // ===== КОМБИНИРУЕМ ОБЩУЮ СТАТИСТИКУ + ДАЙДЖЕСТ =====
+        // Добавляем дайджест как отдельное поле в конец
+        const weekStats = require('./modules/digest.js').getWeekStats();
+        const weekDates = require('./modules/digest.js').getWeekDates();
+        
+        const digestText = 
+            `📅 **${weekDates.start} — ${weekDates.end}**\n` +
+            `📋 Контрактов: ${weekStats.totalContracts}\n` +
+            `✅ Успешных: ${weekStats.successContracts} (${weekStats.totalContracts > 0 ? Math.round((weekStats.successContracts/weekStats.totalContracts)*100) : 0}%)\n` +
+            `❌ Провальных: ${weekStats.failContracts}\n` +
+            `💰 Прибыль: ${weekStats.totalPayout.toLocaleString()} $\n` +
+            `👥 Новых: ${weekStats.newMembers}`;
+        
+        mainEmbed.addFields({ name: '📊 НЕДЕЛЬНЫЙ ДАЙДЖЕСТ', value: digestText, inline: false });
         
         const statsChannel = await client.channels.fetch(statsChannelId);
         if (!statsChannel) return;
@@ -1053,9 +1072,9 @@ async function updateStatsMessage(client, statsChannelId, requestedBy = null) {
         }
         
         if (statsMsg) {
-            await statsMsg.edit({ embeds: [embed] });
+            await statsMsg.edit({ embeds: [mainEmbed] });
         } else {
-            const newMsg = await statsChannel.send({ embeds: [embed] });
+            const newMsg = await statsChannel.send({ embeds: [mainEmbed] });
             saveStatsMessage(statsChannelId, newMsg.id);
         }
     } catch (err) {
