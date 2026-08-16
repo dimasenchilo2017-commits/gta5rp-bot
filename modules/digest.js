@@ -9,17 +9,7 @@ function getWeekStats() {
     const failContracts = db.prepare("SELECT COUNT(*) as count FROM contracts WHERE status = 'fail' AND closedAt > ?").get(weekAgo).count || 0;
     const totalPayout = db.prepare("SELECT SUM(totalPayout) as total FROM contracts WHERE status = 'success' AND closedAt > ?").get(weekAgo).total || 0;
 
-    const newMembers = db.prepare('SELECT COUNT(*) as count FROM members_sync WHERE joinedAt > ?').get(weekAgo).count || 0;
-
-    const topPlayers = db.prepare(`
-        SELECT playerName, totalContracts, successContracts, totalPayout 
-        FROM player_stats 
-        WHERE lastUpdated > ?
-        ORDER BY totalPayout DESC 
-        LIMIT 3
-    `).all(weekAgo);
-
-    return { totalContracts, successContracts, failContracts, totalPayout, newMembers, topPlayers };
+    return { totalContracts, successContracts, failContracts, totalPayout };
 }
 
 function getWeekDates() {
@@ -46,8 +36,7 @@ function getWeekDigestEmbed() {
             { name: '📋 Контрактов', value: `${stats.totalContracts}`, inline: true },
             { name: '✅ Успешных', value: `${stats.successContracts} (${stats.totalContracts > 0 ? Math.round((stats.successContracts/stats.totalContracts)*100) : 0}%)`, inline: true },
             { name: '❌ Провальных', value: `${stats.failContracts}`, inline: true },
-            { name: '💰 Общая прибыль', value: `${stats.totalPayout.toLocaleString()} $`, inline: true },
-            { name: '👥 Новых участников', value: `${stats.newMembers}`, inline: true }
+            { name: '💰 Общая прибыль', value: `${stats.totalPayout.toLocaleString()} $`, inline: true }
         );
 }
 
