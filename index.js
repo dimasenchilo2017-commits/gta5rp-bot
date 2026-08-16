@@ -72,12 +72,24 @@ client.once('clientReady', async () => {
         } catch (err) { console.error('[ERROR] Админ-панель:', err); }
     }
 
+    // ===== АКТИВНОСТЬ =====
+    client.user.setPresence({
+        activities: [
+            {
+                name: 'за Nuerra FamQ 🏴',
+                type: 3,
+            },
+        ],
+        status: 'online',
+    });
+
     // ===== СИНХРОНИЗАЦИЯ СТАРЫХ РЕАКЦИЙ =====
     setTimeout(async () => {
         console.log('🔄 Синхронизация старых реакций...');
         await syncOldReactions();
     }, 5000);
 });
+
 
 // ===== ФУНКЦИЯ СИНХРОНИЗАЦИИ =====
 async function syncOldReactions() {
