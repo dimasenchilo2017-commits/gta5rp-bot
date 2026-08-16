@@ -1052,8 +1052,7 @@ async function updateStatsMessage(client, statsChannelId, requestedBy = null) {
             `📋 Контрактов: ${weekStats.totalContracts}\n` +
             `✅ Успешных: ${weekStats.successContracts} (${weekStats.totalContracts > 0 ? Math.round((weekStats.successContracts/weekStats.totalContracts)*100) : 0}%)\n` +
             `❌ Провальных: ${weekStats.failContracts}\n` +
-            `💰 Прибыль: ${weekStats.totalPayout.toLocaleString()} $\n` +
-            `👥 Новых: ${weekStats.newMembers}`;
+            `💰 Прибыль: ${weekStats.totalPayout.toLocaleString()} $\n`
         
         mainEmbed.addFields({ name: '📊 НЕДЕЛЬНЫЙ ДАЙДЖЕСТ', value: digestText, inline: false });
         
