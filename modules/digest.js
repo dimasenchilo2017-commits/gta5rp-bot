@@ -4,10 +4,10 @@ const { EmbedBuilder } = require('discord.js');
 function getWeekStats() {
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-    const totalContracts = db.prepare('SELECT COUNT(*) as count FROM contracts WHERE closedAt > ?').get(weekAgo).count || 0;
+    const totalContracts = db.prepare("SELECT COUNT(*) as count FROM contracts WHERE closedAt > ?").get(weekAgo).count || 0;
     const successContracts = db.prepare("SELECT COUNT(*) as count FROM contracts WHERE status = 'success' AND closedAt > ?").get(weekAgo).count || 0;
     const failContracts = db.prepare("SELECT COUNT(*) as count FROM contracts WHERE status = 'fail' AND closedAt > ?").get(weekAgo).count || 0;
-    const totalPayout = db.prepare('SELECT SUM(totalPayout) as total FROM contracts WHERE status = "success" AND closedAt > ?').get(weekAgo).total || 0;
+    const totalPayout = db.prepare("SELECT SUM(totalPayout) as total FROM contracts WHERE status = 'success' AND closedAt > ?").get(weekAgo).total || 0;
 
     const newMembers = db.prepare('SELECT COUNT(*) as count FROM members_sync WHERE joinedAt > ?').get(weekAgo).count || 0;
 
