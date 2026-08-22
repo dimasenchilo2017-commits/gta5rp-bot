@@ -950,7 +950,7 @@ client.on('interactionCreate', async i => {
                     .addFields(
                         participants.map(p => ({
                             name: p.name,
-                            value: `Векселей: ${p.bills} | Ожидаемая выплата: ${(p.bills * 1000 * (percent / 100)).toLocaleString()} $`,
+                            value: `Векселей: ${p.bills} | Выплата: ${(p.bills * 1000 * (percent / 100)).toLocaleString()} $`,
                             inline: false
                         }))
                     )
