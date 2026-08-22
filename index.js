@@ -681,6 +681,7 @@ client.on('interactionCreate', async i => {
             }
 
             if (i.customId.startsWith('success_') || i.customId.startsWith('fail_')) {
+                await i.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const parts = i.customId.split('_');
                 const contractId = parseInt(parts[1]);
                 const status = parts[0] === 'success' ? 'success' : 'fail';
