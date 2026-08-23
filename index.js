@@ -682,32 +682,31 @@ client.on('interactionCreate', async i => {
 
             if (i.customId.startsWith('success_') || i.customId.startsWith('fail_')) {
                 await i.deferReply({ flags: [MessageFlags.Ephemeral] });
+                
                 const parts = i.customId.split('_');
                 const contractId = parseInt(parts[1]);
                 const status = parts[0] === 'success' ? 'success' : 'fail';
                 
                 const contract = db.prepare('SELECT * FROM contracts WHERE id = ?').get(contractId);
-                if (!contract) return i.reply({ content: '❌ Контракт не найден.', flags: [MessageFlags.Ephemeral] });
-                if (contract.status !== 'active') return i.reply({ content: '❌ Контракт уже закрыт.', flags: [MessageFlags.Ephemeral] });
+                if (!contract) return i.editReply({ content: '❌ Контракт не найден.' });
+                if (contract.status !== 'active') return i.editReply({ content: '❌ Контракт уже закрыт.' });
                 
                 const isAdmin = i.member.roles.cache.some(role => CONFIG.ALLOWED_ROLES.includes(role.id));
                 if (i.user.id !== contract.creatorId && !isAdmin) {
-                    return i.reply({ content: '❌ Только создатель или админ.', flags: [MessageFlags.Ephemeral] });
+                    return i.editReply({ content: '❌ Только создатель или админ.' });
                 }
                 
                 const result = closeContract(contractId, status, i.user.id);
-                if (!result) return i.reply({ content: '❌ Ошибка закрытия.', flags: [MessageFlags.Ephemeral] });
+                if (!result) return i.editReply({ content: '❌ Ошибка закрытия.' });
                 
-                // ===== ОБНОВЛЯЕМ СООБЩЕНИЕ =====
+                // Обновляем сообщение
                 try {
                     const channel = await client.channels.fetch(CONFIG.PROCESS);
                     const msg = await channel.messages.fetch(contract.msgId);
                     if (msg && msg.embeds.length > 0) {
-                        // Берём текущий эмбед
                         const oldEmbed = msg.embeds[0];
                         const oldDescription = oldEmbed.description || '';
                         
-                        // Создаём новый эмбед
                         const newEmbed = new EmbedBuilder()
                             .setTitle(oldEmbed.title)
                             .setColor(status === 'success' ? 0x00FF00 : 0xFF0000)
@@ -715,7 +714,6 @@ client.on('interactionCreate', async i => {
                             .setTimestamp()
                             .setFooter(oldEmbed.footer ? { text: oldEmbed.footer.text } : null);
                         
-                        // Убираем кнопки
                         await msg.edit({ 
                             embeds: [newEmbed], 
                             components: [] 
@@ -726,9 +724,8 @@ client.on('interactionCreate', async i => {
                 }
                 
                 await updateStatsMessage(client, CONFIG.STATS_CHANNEL);
-                await i.reply({ 
-                    content: `✅ Контракт закрыт! Статус: ${status === 'success' ? 'УСПЕХ' : 'ПРОВАЛ'}`,
-                    flags: [MessageFlags.Ephemeral] 
+                await i.editReply({ 
+                    content: `✅ Контракт закрыт! Статус: ${status === 'success' ? 'УСПЕХ' : 'ПРОВАЛ'}`
                 });
                 return;
             }
@@ -817,7 +814,7 @@ client.on('interactionCreate', async i => {
                     .addFields(
                         participants.map(p => ({
                             name: p.name,
-                            value: `Векселей: ${p.bills} | Ожидаемая выплата: ${(p.bills * 1000).toLocaleString()} $`,
+                            value: `Векселей: ${p.bills} | Выплата: ${(p.bills * 1000).toLocaleString()} $`,
                             inline: false
                         }))
                     )
